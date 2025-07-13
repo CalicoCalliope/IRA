@@ -43,18 +43,54 @@ exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(__webpack_require__(1));
 const child_process_1 = __webpack_require__(2);
+const os = __importStar(__webpack_require__(3));
 function activate(context) {
-    console.log('PEM log file path:', vscode.Uri.joinPath(context.globalStorageUri, '.pem-log.txt').fsPath);
-    function logPEM(message) {
-        const logEntry = `${new Date().toISOString()} - ${message}\n`;
-        const logFileUri = vscode.Uri.joinPath(context.globalStorageUri, '.pem-log.txt');
-        vscode.workspace.fs.readFile(logFileUri).then(data => {
-            const existing = Buffer.from(data).toString('utf8');
-            const updated = existing + logEntry;
-            return vscode.workspace.fs.writeFile(logFileUri, Buffer.from(updated, 'utf8'));
-        }, () => {
-            return vscode.workspace.fs.writeFile(logFileUri, Buffer.from(logEntry, 'utf8'));
+    const logFileUri = vscode.Uri.joinPath(context.globalStorageUri, 'pem-log.json');
+    console.log('PEM log file path:', logFileUri.fsPath);
+    async function getEnvInfo() {
+        return new Promise(resolve => {
+            (0, child_process_1.exec)('python --version', (err, stdout) => {
+                const pythonVersion = stdout.trim();
+                (0, child_process_1.exec)('pip list --format=json', (err2, stdout2) => {
+                    resolve({
+                        pythonVersion,
+                        packages: stdout2
+                    });
+                });
+            });
         });
+    }
+    async function logPEM(pem) {
+        const timestamp = new Date().toISOString();
+        const username = os.userInfo().username;
+        const editor = vscode.window.activeTextEditor;
+        const activeFile = editor?.document.uri.fsPath ?? 'Unknown';
+        const workspaceFolders = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
+        const workingDirectory = workspaceFolders[0] ?? os.homedir();
+        const directoryTree = await vscode.workspace.findFiles('**/*', '**/node_modules/**', 100);
+        const envInfo = await getEnvInfo();
+        const logEntry = {
+            timestamp,
+            pem,
+            username,
+            activeFile,
+            workingDirectory,
+            directoryTree: directoryTree.map(f => vscode.workspace.asRelativePath(f)),
+            pythonVersion: envInfo.pythonVersion,
+            packages: envInfo.packages ? JSON.parse(envInfo.packages) : [],
+        };
+        // Read existing entries and append
+        let existingEntries = [];
+        try {
+            const data = await vscode.workspace.fs.readFile(logFileUri);
+            existingEntries = JSON.parse(Buffer.from(data).toString('utf8'));
+        }
+        catch {
+            existingEntries = [];
+        }
+        existingEntries.push(logEntry);
+        const updatedData = Buffer.from(JSON.stringify(existingEntries, null, 2), 'utf8');
+        await vscode.workspace.fs.writeFile(logFileUri, updatedData);
     }
     // Log diagnostics from LSP (static errors)
     vscode.languages.onDidChangeDiagnostics(event => {
@@ -86,6 +122,13 @@ function activate(context) {
         });
     });
     context.subscriptions.push(runPythonAndCaptureErrors);
+    // Add a button to the status bar
+    const runButton = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    runButton.command = 'IRA.runPythonAndCaptureErrors';
+    runButton.text = '▶ Run Python (IRA)';
+    runButton.tooltip = 'Run current Python file and capture PEMs';
+    runButton.show();
+    context.subscriptions.push(runButton);
 }
 function deactivate() { }
 
@@ -101,6 +144,12 @@ module.exports = require("vscode");
 /***/ ((module) => {
 
 module.exports = require("child_process");
+
+/***/ }),
+/* 3 */
+/***/ ((module) => {
+
+module.exports = require("os");
 
 /***/ })
 /******/ 	]);
