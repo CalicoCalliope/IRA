@@ -56,8 +56,8 @@ This project builds on a wide body of HCI, CS education, and LLM literature. Key
 - Leinonen et al. (2023)
 - Zhou et al. (2021)
 - Bouvier et al. (2024)
-- Anderson et al. (2001), Bloom's Taxonomy
-- Wass & Golding (2014), ZPD Theory
+- Anderson et al. (2001)
+- Wass & Golding (2014)
 
 _See full reference list in `docs/references.md`_
 
