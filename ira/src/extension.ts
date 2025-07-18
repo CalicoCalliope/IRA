@@ -2,6 +2,35 @@ import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
+import axios from 'axios';
+import * as dotenv from 'dotenv';
+import * as fs from 'fs';
+
+let embedder: any = null;
+
+const envPath = path.resolve(__dirname, '..', '.env');
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+  console.log('[DEBUG] Loaded .env from:', envPath);
+} else {
+  console.error('[ERROR] .env file not found at:', envPath);
+}
+
+export async function getEmbedding(text: string): Promise<number[]> {
+  try {
+    if (!embedder) {
+      console.log('Loading embedding model...');
+      const { pipeline } = await import('@xenova/transformers');
+      embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+    }
+
+    const output = await embedder(text, { pooling: 'mean', normalize: true });
+    return Array.from(output.data);
+  } catch (err) {
+    console.error('Embedding error:', err);
+    return [];
+  }
+}
 
 export function activate(context: vscode.ExtensionContext) {
   const logFileUri = vscode.Uri.joinPath(context.globalStorageUri, 'pem-log.json');
@@ -21,7 +50,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
   }
 
-	async function logPEM(pem: string) {
+  async function logPEM(pem: string) {
     const timestamp = new Date().toISOString();
     const username = os.userInfo().username;
     const editor = vscode.window.activeTextEditor;
@@ -30,6 +59,8 @@ export function activate(context: vscode.ExtensionContext) {
     const workingDirectory = workspaceFolders[0] ?? os.homedir();
     const directoryTree = await vscode.workspace.findFiles('**/*', '**/node_modules/**', 100);
     const envInfo = await getEnvInfo();
+    // const embedding = await getEmbedding(pem);
+    const embedding: number[] = []; // temporary fix bc xenova doesn't work rn
 
     const logEntry = {
       timestamp,
@@ -40,33 +71,33 @@ export function activate(context: vscode.ExtensionContext) {
       directoryTree: directoryTree.map(f => vscode.workspace.asRelativePath(f)),
       pythonVersion: envInfo.pythonVersion,
       packages: envInfo.packages ? JSON.parse(envInfo.packages) : [],
+      embedding
     };
 
-    // Read existing entries and append
-    let existingEntries = [];
-    try {
-      const data = await vscode.workspace.fs.readFile(logFileUri);
-      existingEntries = JSON.parse(Buffer.from(data).toString('utf8'));
-    } catch {
-      existingEntries = [];
+    const adminPassword = process.env.OPENSEARCH_INITIAL_ADMIN_PASSWORD;
+    if (!adminPassword) {
+      throw new Error('Missing OPENSEARCH_INITIAL_ADMIN_PASSWORD in .env');
     }
+    const password: string = adminPassword;
 
-    existingEntries.push(logEntry);
-    const updatedData = Buffer.from(JSON.stringify(existingEntries, null, 2), 'utf8');
-    await vscode.workspace.fs.writeFile(logFileUri, updatedData);
-  }
-
-  // Log diagnostics from LSP (static errors)
-  vscode.languages.onDidChangeDiagnostics(event => {
-    event.uris.forEach(uri => {
-      const diagnostics = vscode.languages.getDiagnostics(uri);
-      diagnostics.forEach(diag => {
-        if (diag.severity === vscode.DiagnosticSeverity.Error) {
-          logPEM(`[DIAGNOSTIC] ${diag.message}`);
+    try {
+      const res = await axios.post(
+        'https://localhost:9200/pems/_doc',
+        logEntry,
+        {
+          auth: {
+            username: 'admin',
+            password: password
+          },
+          headers: { 'Content-Type': 'application/json' },
+          httpsAgent: new (require('https').Agent)({ rejectUnauthorized: false }) // allows self-signed certs
         }
-      });
-    });
-  });
+      );
+      console.log('PEM logged to OpenSearch:', res.data);
+    } catch (err) {
+      console.error('Error logging PEM to OpenSearch:', err);
+    }
+  }
 
   // Register command to run Python file via Node.js and log runtime errors
   const runPythonAndCaptureErrors = vscode.commands.registerCommand('IRA.runPythonAndCaptureErrors', async () => {
@@ -83,7 +114,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
       if (stderr) {
         logPEM(`[RUNTIME ERROR] ${stderr}`);
-        vscode.window.showErrorMessage('Runtime error occurred. Logged to .pem-log.txt.');
+        vscode.window.showErrorMessage('Runtime error occurred. Saved to history.');
       }
     });
   });
