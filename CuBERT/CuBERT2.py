@@ -12,8 +12,10 @@ import uuid
 import sys
 
 # Add path to python_tokenizer.py and cubert module
-sys.path.append("/Users/zi/Documents/UZH.ETH/IRA/dev/IRA/CuBERT")
-from cubert import cubert_tokenizer
+# sys.path.append("/Users/zi/Documents/UZH.ETH/IRA/dev/IRA/CuBERT")
+sys.path.append(os.path.join(os.path.dirname(__file__), "CuBERT"))
+
+# from cubert import cubert_tokenizer
 from python_tokenizer import PythonTokenizer # Make sure this matches the function name in python_tokenizer.py
 
 # Load config from environment variables or fallback to defaults
