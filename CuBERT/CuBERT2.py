@@ -14,7 +14,6 @@ import sys
 # Add path to python_tokenizer.py and cubert module
 sys.path.append("/Users/zi/Documents/UZH.ETH/IRA/dev/IRA/CuBERT")
 from cubert import cubert_tokenizer
-# from python_tokenizer import tokenize_python 
 from python_tokenizer import PythonTokenizer # Make sure this matches the function name in python_tokenizer.py
 
 # Load config from environment variables or fallback to defaults
@@ -30,16 +29,14 @@ MAX_LENGTH = int(os.getenv("MAX_LENGTH", "512"))
 model = AutoModel.from_pretrained(MODEL_NAME)
 
 def get_cubert_embedding(code_snippet):
-    # Use the custom tokenizer from python_tokenizer.py
-    tokens = tokenize_python(code_snippet)
-    # Join tokens into a string as expected by HuggingFace tokenizer
+    # Use the PythonTokenizer class from python_tokenizer.py
+    tokenizer = PythonTokenizer()
+    tokens = tokenizer.tokenize_and_abstract(code_snippet)
     tokenized_code = " ".join(tokens)
-    # You may need to adjust this if the model expects something else
-    # Prepare inputs for the model
-    # NOTE: You must map tokens to input_ids using the model's vocab.
-    # This is a placeholder and will not work for real data.
+    # Prepare inputs for the model (you may need to map tokens to input_ids)
     inputs = {
         "input_ids": torch.tensor([[model.config.vocab_size // 2] * min(MAX_LENGTH, len(tokens))])
+        # This is still a placeholder!
     }
     with torch.no_grad():
         outputs = model(**inputs)
