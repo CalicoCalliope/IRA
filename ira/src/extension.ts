@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { exec } from 'child_process';
+import { spawn } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -23,6 +24,7 @@ interface PemLogEntry {
   pythonVersion?: string;
   packages?: any[];
   isFirstOccurrence: boolean;
+  pemSkeleton: string;
 }
 
 // Load .env
@@ -81,6 +83,40 @@ function extractPemType(errorMessage: string): string {
   return match ? match[1] : "UnknownError";
 }
 
+function getPemSkeletonFromPython(pem: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'pem_parser.py');
+    const python = spawn('python', [scriptPath]);
+
+    let output = '';
+    let error = '';
+
+    python.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    python.stderr.on('data', (data) => {
+      error += data.toString();
+    });
+
+    python.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`Python script exited with code ${code}: ${error}`));
+      } else {
+        try {
+          const parsed = JSON.parse(output);
+          resolve(parsed.pemSkeleton);
+        } catch (err) {
+          reject(new Error(`Failed to parse JSON from Python script: ${err}`));
+        }
+      }
+    });
+
+    python.stdin.write(pem);
+    python.stdin.end();
+  });
+}
+
 async function logPEM(pem: string, pemType: string) {
   const id = randomUUID();
   const timestamp = new Date().toISOString();
@@ -91,7 +127,7 @@ async function logPEM(pem: string, pemType: string) {
   const workingDirectory = workspaceFolders[0] ?? os.homedir();
   const directoryTree = await vscode.workspace.findFiles('**/*', '**/node_modules/**', 100);
   const envInfo = await getEnvInfo();
-  const pemSkeleton = null; // Placeholder for future use
+  const pemSkeleton = await getPemSkeletonFromPython(pem);
 
   const client = await getClient();
   const db = client.db("iraLogs");
