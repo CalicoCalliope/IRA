@@ -6,8 +6,24 @@ import * as fs from 'fs';
 import axios from 'axios';
 import * as dotenv from 'dotenv';
 import { randomUUID } from 'crypto';
+import { MongoClient } from "mongodb";
+import { Collection } from "mongodb";
 
 let embedder: any = null;
+
+interface PemLogEntry {
+  _id: string;
+  timestamp: string;
+  pem: string;
+  pemType: string;
+  username: string;
+  activeFile: string;
+  workingDirectory: string;
+  directoryTree: string[];
+  pythonVersion?: string;
+  packages?: any[];
+  isFirstOccurrence: boolean;
+}
 
 // Load .env
 const envPath = path.resolve(__dirname, '..', '.env');
@@ -19,17 +35,28 @@ if (fs.existsSync(envPath)) {
 }
 
 // Environment variables
-const openSearchUrl = process.env.OPENSEARCH_CLOUD_URL;
-const openSearchUser = process.env.OPENSEARCH_API_USER;
-const openSearchPass = process.env.OPENSEARCH_API_PASSWORD;
+const uri = process.env.MONGODB_URI!;
 const qdrantUrl = process.env.QDRANT_URL;
 const qdrantKey = process.env.QDRANT_KEY;
 
-if (!openSearchUrl || !openSearchUser || !openSearchPass) {
-  console.error('[CONFIG ERROR] OpenSearch credentials are missing.');
+if (!uri) {
+  console.error('[CONFIG ERROR] MongoDB credentials are missing.');
+  throw new Error("MONGODB_URI is required but not set.");
 }
 if (!qdrantUrl || !qdrantKey) {
   console.error('[CONFIG ERROR] Qdrant credentials are missing.');
+}
+
+let client: MongoClient | null = null;
+
+export async function getClient(): Promise<MongoClient> {
+  if (client) {
+    return client;
+  }
+
+  client = new MongoClient(uri);
+  await client.connect();
+  return client;
 }
 
 async function getEnvInfo(): Promise<{ pythonVersion?: string, packages?: any[] }> {
@@ -49,7 +76,13 @@ async function getEnvInfo(): Promise<{ pythonVersion?: string, packages?: any[] 
   });
 }
 
-async function logPEM(pem: string) {
+function extractPemType(errorMessage: string): string {
+  const match = errorMessage.match(/([a-zA-Z]+Error)/);
+  return match ? match[1] : "UnknownError";
+}
+
+async function logPEM(pem: string, pemType: string) {
+  const id = randomUUID();
   const timestamp = new Date().toISOString();
   const username = os.userInfo().username;
   const editor = vscode.window.activeTextEditor;
@@ -58,6 +91,14 @@ async function logPEM(pem: string) {
   const workingDirectory = workspaceFolders[0] ?? os.homedir();
   const directoryTree = await vscode.workspace.findFiles('**/*', '**/node_modules/**', 100);
   const envInfo = await getEnvInfo();
+  const pemSkeleton = null; // Placeholder for future use
+
+  const client = await getClient();
+  const db = client.db("iraLogs");
+  const collection: Collection<PemLogEntry> = db.collection<PemLogEntry>("pems");
+
+  const prior = await collection.findOne({ username, pemType });
+  const isFirstOccurrence = prior === null;
 
   let embedding: number[] = [];
   // try {
@@ -73,33 +114,26 @@ async function logPEM(pem: string) {
   // }
 
   const logEntry = {
+    _id: id,
     timestamp,
     pem,
+    pemType,
     username,
     activeFile,
     workingDirectory,
     directoryTree: directoryTree.map(f => vscode.workspace.asRelativePath(f)),
     pythonVersion: envInfo.pythonVersion,
     packages: envInfo.packages,
-    embedding
+    isFirstOccurrence,
+    pemSkeleton
   };
 
-  // --- Log to OpenSearch ---
+  // --- Log to MongoDB ---
   try {
-    const res = await axios.post(
-      `${openSearchUrl}/pems/_doc`,
-      logEntry,
-      {
-        auth: {
-          username: openSearchUser!,
-          password: openSearchPass!
-        },
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
-    console.log('[OpenSearch] PEM logged:', res.data);
+    const result = await collection.insertOne(logEntry);
+    console.log('[MongoDB] PEM logged with ID:', result.insertedId);
   } catch (err: any) {
-    console.error('[OpenSearch Error]', err?.response?.data || err.message || err);
+    console.error('[MongoDB Error]', err.message);
   }
 
 
@@ -107,16 +141,12 @@ async function logPEM(pem: string) {
   if (embedding.length > 0) {
     try {
       const point = {
-        id: randomUUID(),
+        id: id,
         vector: embedding,
         payload: {
-          pem,
           timestamp,
           username,
-          activeFile,
-          workingDirectory,
-          pythonVersion: envInfo.pythonVersion,
-          packages: envInfo.packages
+          pemType
         }
       };
 
@@ -150,14 +180,17 @@ export function activate(context: vscode.ExtensionContext) {
 
     const filePath = editor.document.uri.fsPath;
     exec(`python "${filePath}"`, async (error, stdout, stderr) => {
-      if (stdout) {
-        console.log(`[stdout]: ${stdout}`);
-      }
-      if (stderr) {
-        await logPEM(`[RUNTIME ERROR] ${stderr}`);
-        vscode.window.showErrorMessage('Runtime error occurred. Logged to PEM history.');
-      }
-    });
+    if (stdout) {
+      console.log(`[stdout]: ${stdout}`);
+    }
+
+    if (stderr) {
+      const pem = `[RUNTIME ERROR] ${stderr}`;
+      const pemType = extractPemType(stderr); // Extract directly from raw error string
+      await logPEM(pem, pemType);
+      vscode.window.showErrorMessage(`Runtime error (${pemType}) occurred. Logged to PEM history.`);
+    }
+  });
   });
   context.subscriptions.push(runAndCaptureErrors);
 
@@ -170,4 +203,8 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(runButton);
 }
 
-export function deactivate() {}
+export function deactivate() {
+  if (client) {
+    client.close().catch(console.error);
+  }
+}
