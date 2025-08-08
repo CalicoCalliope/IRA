@@ -37,3 +37,10 @@ coverage/
 # IDE files (optional)
 .idea/
 *.code-workspace
+
+# Python and env
+__pycache__/
+.env
+*.env
+venv/
+path/to/venv/
