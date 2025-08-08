@@ -1,0 +1,39 @@
+# macOS system files
+.DS_Store
+
+# Node.js dependencies and build output
+node_modules/
+dist/
+*.log
+
+# VS Code settings
+.vscode/
+
+# TypeScript cache and compiled output
+*.tsbuildinfo
+
+# Python bytecode and virtual envs
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+
+# dotenv files (secrets)
+.env
+
+# Backup or temp files
+*~
+*.swp
+*.swo
+#*#
+
+# Coverage and test results
+coverage/
+*.lcov
+
+# IDE files (optional)
+.idea/
+*.code-workspace
