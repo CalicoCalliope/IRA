@@ -9,7 +9,7 @@ dist/
 # VS Code settings
 .vscode/
 
-# TypeScript cache and compiled output
+# TypeScript cache
 *.tsbuildinfo
 
 # Python bytecode and virtual envs
@@ -18,29 +18,33 @@ __pycache__/
 *.pyo
 *.pyd
 .venv/
-env/
 venv/
+env/
+path/to/venv/
 
 # dotenv files (secrets)
 .env
+*.env
 
-# Backup or temp files
+# Editor backup and swap files
 *~
 *.swp
 *.swo
 #*#
 
-# Coverage and test results
+# Test coverage
 coverage/
 *.lcov
 
-# IDE files (optional)
+# IDE-specific files
 .idea/
 *.code-workspace
 
-# Python and env
-__pycache__/
-.env
-*.env
-venv/
-path/to/venv/
+# Ignore CuBERT and submodules (if not actively developed)
+CuBERT/
+google-research/
+
+# CuBERT-specific ignored files
+cubert/.DS_Store
+cubert/__pycache__/
+cubert/README.md
