@@ -117,6 +117,36 @@ function getPemSkeletonFromPython(pem: string): Promise<string> {
   });
 }
 
+function getEmbeddingFromPython(codeSnippet: string): Promise<number[]> {
+    return new Promise((resolve, reject) => {
+        const scriptPath = path.join(__dirname, '..', 'scripts', 'CuBERT', 'CuBERT2.py');
+
+        const pyProcess = spawn('python', [scriptPath], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+        let output = '';
+        let errorOutput = '';
+
+        pyProcess.stdout.on('data', data => output += data.toString());
+        pyProcess.stderr.on('data', data => errorOutput += data.toString());
+
+        pyProcess.on('close', () => {
+            try {
+                const parsed = JSON.parse(output);
+                if (parsed.error) {
+                    reject(parsed.error);
+                } else {
+                    resolve(parsed.embedding);
+                }
+            } catch (err) {
+                reject(new Error(`Failed to parse embedding: ${err} | stderr: ${errorOutput}`));
+            }
+        });
+
+        pyProcess.stdin.write(codeSnippet);
+        pyProcess.stdin.end();
+    });
+}
+
 async function logPEM(pem: string, pemType: string) {
   const id = randomUUID();
   const timestamp = new Date().toISOString();
@@ -137,17 +167,12 @@ async function logPEM(pem: string, pemType: string) {
   const isFirstOccurrence = prior === null;
 
   let embedding: number[] = [];
-  // try {
-  //   if (!embedder) {
-  //     console.log('[Embedding] Loading model...');
-  //     const { pipeline } = await import('@xenova/transformers');
-  //     embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
-  //   }
-  //   const output = await embedder(pem, { pooling: 'mean', normalize: true });
-  //   embedding = Array.from(output.data);
-  // } catch (e) {
-  //   console.error('[Embedding error]', e);
-  // }
+  try {
+      embedding = await getEmbeddingFromPython(pem);
+      console.log('[Embedding] Received from Python:', embedding.length);
+  } catch (e) {
+      console.error('[Embedding Error]', e);
+  }
 
   const logEntry = {
     _id: id,
