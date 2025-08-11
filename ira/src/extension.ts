@@ -179,14 +179,14 @@ async function logPEM(pem: string, pemType: string) {
     timestamp,
     pem,
     pemType,
+    pemSkeleton,
     username,
     activeFile,
     workingDirectory,
     directoryTree: directoryTree.map(f => vscode.workspace.asRelativePath(f)),
     pythonVersion: envInfo.pythonVersion,
     packages: envInfo.packages,
-    isFirstOccurrence,
-    pemSkeleton
+    isFirstOccurrence
   };
 
   // --- Log to MongoDB ---
@@ -221,7 +221,7 @@ async function logPEM(pem: string, pemType: string) {
           }
         }
       );
-      console.log('[Qdrant] PEM logged:', res.data);
+      console.log('[Qdrant] Embedding logged:', res.data);
     } catch (err: any) {
       console.error('[Qdrant Error]', err?.response?.data || err.message);
     }
