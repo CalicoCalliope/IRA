@@ -49,16 +49,16 @@ if (!qdrantUrl || !qdrantKey) {
   console.error('[CONFIG ERROR] Qdrant credentials are missing.');
 }
 
-let client: MongoClient | null = null;
+let clientDB: MongoClient | null = null;
 
 export async function getClient(): Promise<MongoClient> {
-  if (client) {
-    return client;
+  if (clientDB) {
+    return clientDB;
   }
 
-  client = new MongoClient(uri);
-  await client.connect();
-  return client;
+  clientDB = new MongoClient(uri);
+  await clientDB.connect();
+  return clientDB;
 }
 
 async function getEnvInfo(): Promise<{ pythonVersion?: string, packages?: any[] }> {
@@ -159,8 +159,8 @@ async function logPEM(pem: string, pemType: string) {
   const envInfo = await getEnvInfo();
   const pemSkeleton = await getPemSkeletonFromPython(pem);
 
-  const client = await getClient();
-  const db = client.db("iraLogs");
+  const clientDB = await getClient();
+  const db = clientDB.db("iraLogs");
   const collection: Collection<PemLogEntry> = db.collection<PemLogEntry>("pems");
 
   const prior = await collection.findOne({ username, pemType });
@@ -265,7 +265,7 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-  if (client) {
-    client.close().catch(console.error);
+  if (clientDB) {
+    clientDB.close().catch(console.error);
   }
 }
