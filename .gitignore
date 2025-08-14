@@ -1,8 +1,11 @@
 # Node.js dependencies
 node_modules/
+**/node_modules/
 
-# Output of the build
+# Build outputs and artifacts
+build/
 dist/
+**/dist/
 out/
 
 # Logs
@@ -12,36 +15,67 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Environment variables
+# Environment variables and secrets
 .env
+.env.*
+*.env
 .env.local
 .env.*.local
 
-# VSCode settings and workspace files
+# Python artifacts and virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ipynb_checkpoints/
+**/__pycache__/
+.venv/
+.venv*/
+venv/
+*.pkl  # Python build cache
+
+# VS Code and IDE files
 .vscode/
 .history/
+.idea/
+**/.vscode/
+*.code-workspace
 
-# OS generated files
+# OS and system files
 .DS_Store
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
 # TypeScript cache
 *.tsbuildinfo
 
-# Coverage directory
+# Coverage and test results
 coverage/
+*.lcov
 
 # Temporary files
 tmp/
 temp/
 
-# Mac system files
-.AppleDouble
-.LSOverride
+# Qdrant local data
+qdrant_storage/
+snapshots/
 
-# Windows system files
-ehthumbs.db
-Desktop.ini
+# CuBERT vendor and large artifacts
+google-research/
+**/google-research/
+*.spm
+
+# Source maps (optional)
+*.map
 
 # Others
 *.tgz
