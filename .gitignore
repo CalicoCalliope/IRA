@@ -1,6 +1,14 @@
 # macOS
 .DS_Store
 
+# Logs
+*.log
+
+# Env files
+.env
+.env.*
+*.env
+
 # Python
 __pycache__/
 *.pyc
@@ -10,60 +18,42 @@ __pycache__/
 .eggs/
 .pytest_cache/
 .ipynb_checkpoints/
+**/__pycache__/
 
 # Virtual envs
 .venv/
-.venv311/
+.venv*/
 venv/
 
 # Build artifacts
-dist/
 build/
+dist/
+**/dist/
 
-# IDE
+# IDE/editor
 .vscode/
 .idea/
+**/.vscode/
 
 # Node
 node_modules/
+**/node_modules/
 
 # Qdrant local data (if any)
 qdrant_storage/
 snapshots/
 
-# Env files
-.env
-.env.*
-
 # CuBERT vendor and large artifacts
 google-research/
+**/google-research/
 *.spm
 
-# Logs
-*.log
-
-# match in any subfolder
-**/node_modules/
-**/dist/
-**/google-research/
-**/__pycache__/
-
-# env files by name pattern
-*.env
-
-# optional: ignore sourcemaps
+# Source maps (optional)
 *.map
 
-cat >> .gitignore <<'EOF'
-# catch nested locations too
-**/node_modules/
-**/dist/
-**/__pycache__/
-**/.vscode/
+# macOS Spotlight indexing
+.Spotlight-V100
+.Trashes
 
-# common build maps
-*.map
-
-# env files
-*.env
-EOF
+# Python build cache
+*.pkl
