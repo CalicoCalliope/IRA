@@ -1,50 +1,69 @@
-# macOS system files
+# macOS
 .DS_Store
 
-# Node.js dependencies and build output
-node_modules/
-dist/
-*.log
-
-# VS Code settings
-.vscode/
-
-# TypeScript cache
-*.tsbuildinfo
-
-# Python bytecode and virtual envs
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.venv/
-venv/
-env/
-path/to/venv/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ipynb_checkpoints/
 
-# dotenv files (secrets)
+# Virtual envs
+.venv/
+.venv311/
+venv/
+
+# Build artifacts
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# Node
+node_modules/
+
+# Qdrant local data (if any)
+qdrant_storage/
+snapshots/
+
+# Env files
 .env
+.env.*
+
+# CuBERT vendor and large artifacts
+google-research/
+*.spm
+
+# Logs
+*.log
+
+# match in any subfolder
+**/node_modules/
+**/dist/
+**/google-research/
+**/__pycache__/
+
+# env files by name pattern
 *.env
 
-# Editor backup and swap files
-*~
-*.swp
-*.swo
-#*#
+# optional: ignore sourcemaps
+*.map
 
-# Test coverage
-coverage/
-*.lcov
+cat >> .gitignore <<'EOF'
+# catch nested locations too
+**/node_modules/
+**/dist/
+**/__pycache__/
+**/.vscode/
 
-# IDE-specific files
-.idea/
-*.code-workspace
+# common build maps
+*.map
 
-# Ignore CuBERT and submodules (if not actively developed)
-CuBERT/
-google-research/
-
-# CuBERT-specific ignored files
-cubert/.DS_Store
-cubert/__pycache__/
-cubert/README.md
+# env files
+*.env
+EOF
