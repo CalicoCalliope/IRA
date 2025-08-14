@@ -1,18 +1,22 @@
 import * as vscode from 'vscode';
-import { exec, spawn } from 'child_process';
+import { exec } from 'child_process';
+import { spawn } from 'child_process';
+import * as os from 'os';
 import * as path from 'path';
+import * as fs from 'fs';
 import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
-import { logPemToCoordinator } from "./coordinator-service";
+import * as dotenv from 'dotenv';
+import { randomUUID } from 'crypto';
+import { MongoClient } from "mongodb";
+import { Collection } from "mongodb";
 
-// ---------------------- TYPES ----------------------
-export interface PemLogEntry {
-  id: string;
+let embedder: any = null;
+
+interface PemLogEntry {
+  _id: string;
   timestamp: string;
   pem: string;
   pemType: string;
-  pemSkeleton: string;
-  code: string;
   username: string;
   activeFile: string;
   workingDirectory: string;
@@ -20,35 +24,51 @@ export interface PemLogEntry {
   pythonVersion?: string;
   packages?: any[];
   isFirstOccurrence: boolean;
-  llm: {
-    hint?: string;
-    reasoning?: string;
-    answer?: string;
-  };
+  pemSkeleton: string;
 }
 
-interface WebviewState {
-  stage: 'initial' | 'hint' | 'reasoning' | 'answer';
-  isFirstOccurrence: boolean;
-  hint?: string;
-  reasoning?: string;
-  answer?: string;
-  context?: string;
-  initialMessage?: string;
+// Load .env
+const envPath = path.resolve(__dirname, '..', '.env');
+if (fs.existsSync(envPath)) {
+  dotenv.config({ path: envPath });
+  console.log('[DEBUG] Loaded .env from:', envPath);
+} else {
+  console.error('[ERROR] .env file not found at:', envPath);
 }
 
-// ---------------------- CONFIG ----------------------
-const COORDINATOR_URL = 'http://YOUR_VM_IP:PORT';
+// Environment variables
+const uri = process.env.MONGODB_URI!;
+const qdrantUrl = process.env.QDRANT_URL;
+const qdrantKey = process.env.QDRANT_KEY;
 
-// ---------------------- HELPER FUNCTIONS ----------------------
-async function getEnvInfo(): Promise<{ pythonVersion?: string; packages?: any[] }> {
-  return new Promise((resolve) => {
+if (!uri) {
+  console.error('[CONFIG ERROR] MongoDB credentials are missing.');
+  throw new Error("MONGODB_URI is required but not set.");
+}
+if (!qdrantUrl || !qdrantKey) {
+  console.error('[CONFIG ERROR] Qdrant credentials are missing.');
+}
+
+let client: MongoClient | null = null;
+
+export async function getClient(): Promise<MongoClient> {
+  if (client) {
+    return client;
+  }
+
+  client = new MongoClient(uri);
+  await client.connect();
+  return client;
+}
+
+async function getEnvInfo(): Promise<{ pythonVersion?: string, packages?: any[] }> {
+  return new Promise(resolve => {
     exec('python --version', (err, stdout) => {
-      const pythonVersion = stdout?.trim();
+      const pythonVersion = stdout.trim();
       exec('pip list --format=json', (err2, stdout2) => {
         let packages: any[] = [];
         try {
-          if (stdout2?.trim()){
+          if (stdout2?.trim()) {
             packages = JSON.parse(stdout2);
           }
         } catch {}
@@ -60,7 +80,7 @@ async function getEnvInfo(): Promise<{ pythonVersion?: string; packages?: any[] 
 
 function extractPemType(errorMessage: string): string {
   const match = errorMessage.match(/([a-zA-Z]+Error)/);
-  return match ? match[1] : 'UnknownError';
+  return match ? match[1] : "UnknownError";
 }
 
 function getPemSkeletonFromPython(pem: string): Promise<string> {
@@ -71,8 +91,13 @@ function getPemSkeletonFromPython(pem: string): Promise<string> {
     let output = '';
     let error = '';
 
-    python.stdout.on('data', (data) => (output += data.toString()));
-    python.stderr.on('data', (data) => (error += data.toString()));
+    python.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    python.stderr.on('data', (data) => {
+      error += data.toString();
+    });
 
     python.on('close', (code) => {
       if (code !== 0) {
@@ -92,261 +117,130 @@ function getPemSkeletonFromPython(pem: string): Promise<string> {
   });
 }
 
-async function buildPemLogEntry(
-  pem: string,
-  code: string,
-  filePath: string,
-): Promise<PemLogEntry> {
-  const { pythonVersion, packages } = await getEnvInfo();
-  let pemSkeleton = pem.split(':')[0]; // fallback skeleton
-  try {
-    pemSkeleton = await getPemSkeletonFromPython(pem);
-  } catch (err) {
-    console.warn('Failed to get PEM skeleton:', err);
-  }
-
-  return {
-    id: uuidv4(),
-    timestamp: new Date().toISOString(),
-    pem,
-    pemType: extractPemType(pem),
-    pemSkeleton,
-    code,
-    username: process.env.USER || 'unknown',
-    activeFile: filePath,
-    workingDirectory: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
-    directoryTree: [],
-    pythonVersion,
-    packages,
-    isFirstOccurrence: true,
-    llm: {}
-  };
-}
-
-async function sendPemLog(entry: PemLogEntry): Promise<string> {
-  try {
-    const response = await axios.post(`${COORDINATOR_URL}/process-pem`, entry);
-    const data = response.data;
-    return typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  } catch (error) {
-    console.error('Error sending PEM to coordinator:', error);
-    return 'Failed to communicate with PEM service.';
-  }
-}
-
-function createLLMPanel(title: string, content: string) {
-  const panel = vscode.window.createWebviewPanel(
-    'pemLLM',
-    title,
-    vscode.ViewColumn.Beside,
-    { enableScripts: true }
-  );
-
-  panel.webview.html = `
-    <html>
-      <body>
-        <h2>${title}</h2>
-        <pre>${content}</pre>
-      </body>
-    </html>
-  `;
-}
-
-function getHraWebviewHtml(state: WebviewState) {
-  const { stage, isFirstOccurrence, hint, reasoning, answer, context, initialMessage } = state;
-
-  let content = '';
-  let buttons = '';
-
-  switch (stage) {
-    case 'initial':
-      content = initialMessage + (context && !isFirstOccurrence ? `<pre>${context}</pre>` : '');
-      buttons = `
-        <button onclick="sendMessage('nextStage', { stage: 'hint', isFirstOccurrence: ${isFirstOccurrence}, hint: '${hint}', reasoning: '${reasoning}', answer: '${answer}' })">Yes</button>
-        <button onclick="sendMessage('close')">No</button>
-      `;
-      break;
-    case 'hint':
-      content = `<b>Hint:</b> ${hint}`;
-      buttons = `
-        <button onclick="sendMessage('nextStage', { stage: 'reasoning', isFirstOccurrence: ${isFirstOccurrence}, hint: '${hint}', reasoning: '${reasoning}', answer: '${answer}' })">Show More</button>
-        <button onclick="sendMessage('close')">Got It</button>
-      `;
-      break;
-    case 'reasoning':
-      content = `<b>Reasoning:</b> ${reasoning}`;
-      buttons = `
-        <button onclick="sendMessage('nextStage', { stage: 'answer', isFirstOccurrence: ${isFirstOccurrence}, hint: '${hint}', reasoning: '${reasoning}', answer: '${answer}' })">Show More</button>
-        <button onclick="sendMessage('close')">Got It</button>
-      `;
-      break;
-    case 'answer':
-      content = `<b>Answer:</b> ${answer}`;
-      buttons = `<button onclick="sendMessage('close')">Got It</button>`;
-      break;
-  }
-
-  return `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <title>HRA Panel</title>
-    </head>
-    <body>
-      <div>${content}</div>
-      <div style="margin-top: 15px;">${buttons}</div>
-
-      <script>
-        const vscode = acquireVsCodeApi();
-        function sendMessage(command, data = {}) {
-          vscode.postMessage({ command, data });
-        }
-      </script>
-    </body>
-    </html>
-  `;
-}
-
-export function createHraWebview(
-  title: string,
-  isFirstOccurrence: boolean,
-  hint?: string,
-  reasoning?: string,
-  answer?: string,
-  context?: string
-) {
-  const panel = vscode.window.createWebviewPanel(
-    'hraPanel',
-    title,
-    vscode.ViewColumn.Beside,
-    {
-      enableScripts: true
-    }
-  );
-
-  const initialMessage = isFirstOccurrence
-    ? 'Need any help with the error?'
-    : 'Hey, we have seen this before! Here is what happened:';
-
-  panel.webview.html = getHraWebviewHtml({
-    stage: 'initial',
-    isFirstOccurrence,
-    hint,
-    reasoning,
-    answer,
-    context,
-    initialMessage
-  });
-
-  // Handle messages from the Webview
-  panel.webview.onDidReceiveMessage(
-    message => {
-      switch (message.command) {
-        case 'nextStage':
-          panel.webview.html = getHraWebviewHtml({
-            ...message.data
-          });
-          break;
-        case 'close':
-          panel.dispose();
-          break;
-      }
-    },
-    undefined
-  );
-}
-
-// ---------------------- RUNTIME ERROR HANDLING ----------------------
-function extractRuntimeError(stderr: string): string | null {
-  const match = stderr.match(/Exception:.*|Error:.*|Traceback \(most recent call last\):/i);
-  return match ? match[0] : null;
-}
-
-// ---------------------- RUN WITH IRA ----------------------
-export async function runCodeWithIra(filePath: string, language: string) {
+async function logPEM(pem: string, pemType: string) {
+  const id = randomUUID();
+  const timestamp = new Date().toISOString();
+  const username = os.userInfo().username;
   const editor = vscode.window.activeTextEditor;
-  if (!editor){
-    return;
+  const activeFile = editor?.document.uri.fsPath ?? 'Unknown';
+  const workspaceFolders = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
+  const workingDirectory = workspaceFolders[0] ?? os.homedir();
+  const directoryTree = await vscode.workspace.findFiles('**/*', '**/node_modules/**', 100);
+  const envInfo = await getEnvInfo();
+  const pemSkeleton = await getPemSkeletonFromPython(pem);
+
+  const client = await getClient();
+  const db = client.db("iraLogs");
+  const collection: Collection<PemLogEntry> = db.collection<PemLogEntry>("pems");
+
+  const prior = await collection.findOne({ username, pemType });
+  const isFirstOccurrence = prior === null;
+
+  let embedding: number[] = [];
+  // try {
+  //   if (!embedder) {
+  //     console.log('[Embedding] Loading model...');
+  //     const { pipeline } = await import('@xenova/transformers');
+  //     embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+  //   }
+  //   const output = await embedder(pem, { pooling: 'mean', normalize: true });
+  //   embedding = Array.from(output.data);
+  // } catch (e) {
+  //   console.error('[Embedding error]', e);
+  // }
+
+  const logEntry = {
+    _id: id,
+    timestamp,
+    pem,
+    pemType,
+    username,
+    activeFile,
+    workingDirectory,
+    directoryTree: directoryTree.map(f => vscode.workspace.asRelativePath(f)),
+    pythonVersion: envInfo.pythonVersion,
+    packages: envInfo.packages,
+    isFirstOccurrence,
+    pemSkeleton
+  };
+
+  // --- Log to MongoDB ---
+  try {
+    const result = await collection.insertOne(logEntry);
+    console.log('[MongoDB] PEM logged with ID:', result.insertedId);
+  } catch (err: any) {
+    console.error('[MongoDB Error]', err.message);
   }
 
-  const code = editor.document.getText();
 
-  exec(`python "${filePath}"`, async (error, stdout, stderr) => {
-    if (stdout){
-      console.log(`[stdout]: ${stdout}`);
-    }
-
-    if (stderr) {
-      const pem = `[RUNTIME ERROR] ${stderr}`;
-      const pemType = extractPemType(stderr);
-      const pemSkeleton = await getPemSkeletonFromPython(pem);
-      const envInfo = await getEnvInfo();
-
-      // Build log entry for coordinator
-      const pemLogEntry = {
-        id: uuidv4(),
-        timestamp: new Date().toISOString(),
-        pem,
-        pemType,
-        pemSkeleton,
-        code,
-        username: process.env.USER || process.env.USERNAME || vscode.env.machineId,
-        activeFile: filePath,
-        workingDirectory: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
-        directoryTree: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) || [],
-        pythonVersion: envInfo.pythonVersion,
-        packages: envInfo.packages,
-        isFirstOccurrence: false, // will be updated by coordinator
-        llm: {}
+  // --- Log to Qdrant ---
+  if (embedding.length > 0) {
+    try {
+      const point = {
+        id: id,
+        vector: embedding,
+        payload: {
+          timestamp,
+          username,
+          pemType
+        }
       };
 
-      // Send to coordinator and get enriched response (HRA + firstOccurrence + context)
-      const coordinatorResponse = await logPemToCoordinator(pemLogEntry);
-
-      // coordinatorResponse should include:
-      // { isFirstOccurrence, hint, reasoning, answer, context? }
-
-      createHraWebview(
-        'PEM Assistant',
-        coordinatorResponse.isFirstOccurrence,
-        coordinatorResponse.hint,
-        coordinatorResponse.reasoning,
-        coordinatorResponse.answer,
-        coordinatorResponse.context
+      const res = await axios.put(
+        `${qdrantUrl}/collections/pems/points`,
+        { points: [point] },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'api-key': qdrantKey!
+          }
+        }
       );
-
-      vscode.window.showErrorMessage(`Runtime error (${pemType}) occurred. HRA panel opened.`);
+      console.log('[Qdrant] PEM logged:', res.data);
+    } catch (err: any) {
+      console.error('[Qdrant Error]', err?.response?.data || err.message);
     }
-  });
+  } else {
+    console.warn('[Qdrant] Skipped logging — embedding unavailable.');
+  }
 }
 
-// ---------------------- EXTENSION ACTIVATION ----------------------
 export function activate(context: vscode.ExtensionContext) {
-  // Register the "Run with Ira" command
-  const runAndCaptureErrors = vscode.commands.registerCommand('ira.runWithIra', async () => {
+  // Register command to run Python and capture PEMs
+  const runAndCaptureErrors = vscode.commands.registerCommand('IRA.runPythonAndCaptureErrors', async () => {
     const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.languageId !== 'python') {
+    if (!editor || !editor.document.fileName.endsWith('.py')) {
       vscode.window.showErrorMessage('Open a Python file to run.');
       return;
     }
 
     const filePath = editor.document.uri.fsPath;
-    const language = editor.document.languageId;
+    exec(`python "${filePath}"`, async (error, stdout, stderr) => {
+    if (stdout) {
+      console.log(`[stdout]: ${stdout}`);
+    }
 
-    runCodeWithIra(filePath, language);
+    if (stderr) {
+      const pem = `[RUNTIME ERROR] ${stderr}`;
+      const pemType = extractPemType(stderr); // Extract directly from raw error string
+      await logPEM(pem, pemType);
+      vscode.window.showErrorMessage(`Runtime error (${pemType}) occurred. Logged to PEM history.`);
+    }
   });
-
+  });
   context.subscriptions.push(runAndCaptureErrors);
 
-  // Create a status bar button (bottom-left) for "Run with Ira"
+  // Add a button to the status bar
   const runButton = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-  runButton.command = 'ira.runWithIra'; // must match the command registered above
-  runButton.text = '▶ Run with Ira';
-  runButton.tooltip = 'Run current Python file and capture runtime errors';
+  runButton.command = 'IRA.runPythonAndCaptureErrors';
+  runButton.text = '▶ Run Python (IRA)';
+  runButton.tooltip = 'Run current Python file and capture PEMs';
   runButton.show();
-
   context.subscriptions.push(runButton);
 }
 
-export function deactivate() {}
+export function deactivate() {
+  if (client) {
+    client.close().catch(console.error);
+  }
+}
