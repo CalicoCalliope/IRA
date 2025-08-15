@@ -78,4 +78,4 @@ google-research/
 *.map
 
 # Others
-*.tgz
+*.tgzbackups/
