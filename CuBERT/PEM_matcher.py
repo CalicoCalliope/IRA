@@ -1,177 +1,212 @@
-import re
-import traceback
-import builtins
-from typing import List, Dict, Optional
+import os
+import sys
+from typing import Optional, Callable
 
-class PEMTemplateMatcher:
+
+def _load_dotenv_if_present(repo_root: str) -> None:
+    """Load environment variables from <repo>/.env if python-dotenv is available."""
+    try:
+        from dotenv import load_dotenv  # type: ignore
+    except Exception:
+        return
+    env_path = os.path.join(repo_root, ".env")
+    if os.path.exists(env_path):
+        load_dotenv(env_path)
+
+
+def _maybe_call_local_entry(argv) -> Optional[int]:
+    """Call a local entry function if one exists.
+
+    We avoid any self-import or runpy indirection to prevent recursion. If a
+    function like `cli`, `run`, `entrypoint`, `pipeline`, or `run_pipeline`
+    exists in *this* module, we call it.
     """
-    Canonicalize and match Python error messages (PEMs).
-    Supports live exceptions and raw PEM logs.
+    candidates = ("cli", "run", "entrypoint", "pipeline", "run_pipeline")
+    for name in candidates:
+        fn: Optional[Callable] = globals().get(name)  # type: ignore[assignment]
+        if callable(fn):
+            result = fn(argv[1:])  # pass through CLI args after program name
+            return 0 if result in (None, True) else int(result)
+    return None
+
+
+def cli(argv):
+    """CLI for the CuBERT PEM pipeline."""
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(
+        prog="pem_parser",
+        description="Run CuBERT PEM pipeline.",
+    )
+    parser.add_argument(
+        "--input",
+        type=str,
+        default=os.environ.get("PEM_INPUT", ""),
+        help="Path to input file (e.g., JSONL) or leave empty for a tiny built-in sample.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=int(os.environ.get("PEM_LIMIT", "0") or 0),
+        help="Max number of items to process (0 = no limit).",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=int(os.environ.get("PEM_BATCH_SIZE", "32") or 32),
+        help="Batch size for embedding.",
+    )
+
+    # Mongo config
+    parser.add_argument(
+        "--mongo-uri",
+        type=str,
+        default=os.environ.get("MONGO_URI", ""),
+        help="MongoDB connection string. Falls back to MONGO_URI env var.",
+    )
+    parser.add_argument(
+        "--mongo-db",
+        type=str,
+        default=os.environ.get("MONGO_DB", ""),
+        help="MongoDB database name. Falls back to MONGO_DB env var.",
+    )
+    parser.add_argument(
+        "--mongo-collection",
+        type=str,
+        default=os.environ.get("MONGO_COLLECTION", ""),
+        help="MongoDB collection name. Falls back to MONGO_COLLECTION env var.",
+    )
+
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Parse args and exit without executing the pipeline.",
+    )
+    parser.add_argument(
+        "--commit",
+        action="store_true",
+        help="Actually write results to MongoDB. Without this, no DB writes occur.",
+    )
+
+    args = parser.parse_args(argv)
+
+    if args.dry_run:
+        print("PEM pipeline dry-run: arguments parsed; no execution.")
+        return 0
+
+    # Call the actual pipeline.
+    return run_pipeline(args)
+
+
+def run_pipeline(args) -> int:
+    """Hook up CuBERT/MongoDB pipeline.
+
+    This keeps behavior safe by default: we *do not* write to MongoDB unless
+    the user passes --commit. You can wire in your actual tokenization and
+    embedding where indicated below.
     """
+    import json
+    from pathlib import Path
 
-    def __init__(self, extra_exceptions: Optional[List[str]] = None):
-        # Gather all built-in exception names
-        self.exception_names = set(
-            obj.__name__ for obj in vars(builtins).values()
-            if isinstance(obj, type) and issubclass(obj, BaseException)
-        )
-        # Add user-supplied/custom exception names
-        if extra_exceptions:
-            self.exception_names.update(extra_exceptions)
+    try:
+        # 1) Load or synthesize input
+        items = []
+        if args.input:
+            p = Path(args.input)
+            if not p.exists():
+                print(f"[PEM] Input not found: {p}")
+                return 2
+            # Assume JSONL for convenience; tweak as needed.
+            with p.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        items.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        # Fallback: treat the whole line as a 'text' field.
+                        items.append({"text": line})
+        else:
+            # Tiny built-in sample
+            items = [
+                {"text": "NameError: name 'foo' is not defined"},
+                {"text": "ZeroDivisionError: division by zero"},
+            ]
 
-        # Template DB: canonical template -> list of raw PEMs and metadata
-        self.template_db: Dict[str, List[Dict]] = {}
+        if args.limit and args.limit > 0:
+            items = items[: args.limit]
 
-    # --------- 1. Manual/regex masking for common patterns ----------
-    @staticmethod
-    def manual_masking(pem: str) -> str:
-        pem = re.sub(r"name '.*?' is not defined", "name '<VAR>' is not defined", pem)
-        pem = re.sub(r"line \d+", "line <NUM>", pem)
-        pem = re.sub(r'File ".*?"', 'File "<PATH>"', pem)
-        pem = re.sub(r"in [a-zA-Z_][\w]*", "in <FUNC>", pem)
-        pem = re.sub(r"'[A-Za-z0-9_]+'", "'<STR>'", pem)  # quoted variable/values
-        pem = re.sub(r"\d+\.\d+|\d+", "<NUM>", pem)        # standalone numbers
-        return pem
+        print(f"[PEM] Loaded {len(items)} item(s). Batch size={args.batch_size}")
 
-    # --------- 2. Auto-mask all built-in/custom exceptions ----------
-    def exception_masking(self, pem: str) -> str:
-        for exc_name in self.exception_names:
-            pem = re.sub(fr"{exc_name}:.*", f"{exc_name}: <MSG>", pem)
-        return pem
+        # 2) Tokenize/Embed (STUB). Replace with your actual CuBERT logic.
+        # For now, produce a trivial 'embedding' to prove plumbing works.
+        processed = []
+        for obj in items:
+            text = obj.get("text", "")
+            # TODO: replace with real tokenizer + CuBERT embedding inference
+            embedding = [float(len(text))]  # placeholder
+            processed.append(
+                {
+                    **obj,
+                    "embedding": embedding,
+                }
+            )
 
-    # --------- 3. Canonicalize raw PEM string (combine both) --------
-    def canonicalize_raw_pem(self, raw_pem: str) -> str:
-        pem = self.manual_masking(raw_pem)
-        pem = self.exception_masking(pem)
-        return pem.strip()
+        print(f"[PEM] Produced {len(processed)} embedding(s).")
 
-    # --------- 4. Canonicalize live exception using traceback -------
-    @staticmethod
-    def canonicalize_traceback(tb_list, exc_type):
-        skeleton = []
-        for frame in tb_list:
-            skeleton.append('File "<PATH>", line <NUM>, in <FUNC>')
-        skeleton.append(f"{exc_type}: <MSG>")
-        return "\n".join(skeleton)
+        # 3) Optionally write to MongoDB if --commit is set
+        if not args.commit:
+            print("[PEM] --commit not provided; skipping MongoDB writes.")
+            return 0
 
-    def add_live_exception(self, exception: Exception, metadata: Optional[Dict] = None):
-        tb_list = traceback.extract_tb(exception.__traceback__)
-        exc_type = type(exception).__name__
-        template = self.canonicalize_traceback(tb_list, exc_type)
-        raw_pem = ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))
-        entry = {"pem": raw_pem, "metadata": metadata or {}}
-        self.template_db.setdefault(template, []).append(entry)
-        return template, raw_pem
+        if not args.mongo_uri or not args.mongo_db or not args.mongo_collection:
+            print(
+                "[PEM] Missing MongoDB config. Provide --mongo-uri, --mongo-db, and --mongo-collection "
+                "or set MONGO_URI / MONGO_DB / MONGO_COLLECTION env vars."
+            )
+            return 3
 
-    # --------- 5. Add raw PEM string to DB -------------------------
-    def add_raw_pem(self, raw_pem: str, metadata: Optional[Dict] = None):
-        template = self.canonicalize_raw_pem(raw_pem)
-        entry = {"pem": raw_pem, "metadata": metadata or {}}
-        self.template_db.setdefault(template, []).append(entry)
-        return template, raw_pem
+        try:
+            from pymongo import MongoClient  # type: ignore
+        except Exception as exc:
+            print(
+                f"[PEM] pymongo is not installed: {type(exc).__name__}: {exc}\n"
+                "      pip install pymongo"
+            )
+            return 4
 
-    # --------- 6. Exact/fuzzy template lookup ----------------------
-    def match_pem(self, new_pem: str, fuzzy: bool = False, min_ratio: float = 0.85):
-        import difflib
-        new_template = self.canonicalize_raw_pem(new_pem)
-        # Exact match
-        if new_template in self.template_db:
-            return new_template, self.template_db[new_template]
-        # Fuzzy match (optional)
-        if fuzzy:
-            matches = difflib.get_close_matches(new_template, self.template_db.keys(), n=1, cutoff=min_ratio)
-            if matches:
-                match = matches[0]
-                return match, self.template_db[match]
-        return None, None
+        client = MongoClient(args.mongo_uri)
+        coll = client[args.mongo_db][args.mongo_collection]
 
-    def _extract_message_from_raw(self, raw: str, exc_type: Optional[str] = None) -> Optional[str]:
-        # Try to find the exception message in the last non-empty line
-        lines = [ln.strip() for ln in raw.strip().splitlines() if ln.strip()]
-        if not lines:
-            return None
-        last = lines[-1]
-        # If exc_type known, prefer that line
-        if exc_type:
-            for ln in reversed(lines):
-                if ln.startswith(f"{exc_type}:"):
-                    last = ln
-                    break
-        if ":" in last:
-            return last.split(":", 1)[1].strip()
-        return last
+        # Upsert by a stable key if you have one; for now we just insert many.
+        if processed:
+            result = coll.insert_many(processed, ordered=False)
+            print(f"[PEM] Inserted {len(result.inserted_ids)} document(s) into MongoDB.")
+        else:
+            print("[PEM] Nothing to write.")
 
-    def format_template_for_display(self, template: str, entries: Optional[List[Dict]] = None) -> str:
-        # If template ends with '<MSG>', try to substitute a representative message for display
-        lines = template.splitlines()
-        if not lines:
-            return template
-        last = lines[-1]
-        m = re.match(r"^([A-Za-z_][\w]*)\:\s*<MSG>$", last)
-        if m and entries:
-            exc_type = m.group(1)
-            msg = None
-            # Pick the first entry's raw PEM to extract a message
-            raw = None
-            for e in entries:
-                raw = e.get("pem")
-                if raw:
-                    break
-            if raw:
-                msg = self._extract_message_from_raw(raw, exc_type=exc_type)
-            if msg:
-                lines[-1] = f"{exc_type}: {msg}"
-                return "\n".join(lines)
-        return template
+        return 0
 
-    def get_all_templates(self) -> List[str]:
-        return list(self.template_db.keys())
+    except Exception as exc:
+        # Show real exception messages (no placeholders).
+        print(f"[PEM] pipeline failed: {type(exc).__name__}: {exc}")
+        return 1
 
-    def clear_db(self):
-        self.template_db.clear()
 
-# ------------------ EXAMPLE USAGE ------------------
+def main(argv=None) -> int:
+    if argv is None:
+        argv = sys.argv
+
+    # Load optional env vars from repo root. This is safe and non-recursive.
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    _load_dotenv_if_present(repo_root)
+
+    # Try to call a local entry function if one exists; otherwise do nothing.
+    ret = _maybe_call_local_entry(argv)
+    return 0 if ret is None else ret
+
 
 if __name__ == "__main__":
-    matcher = PEMTemplateMatcher(extra_exceptions=["CustomAppException"])
-
-    # Add a live exception
-    try:
-        def foo(): bar()
-        def bar(): 1/0
-        foo()
-    except Exception as e:
-        live_tmpl, live_raw = matcher.add_live_exception(e, metadata={"example": "ZeroDivisionError"})
-        print("\n[Live exception template (canonical)]:\n", live_tmpl)
-        print("\n[Live exception template (display)]:\n", matcher.format_template_for_display(live_tmpl, matcher.template_db.get(live_tmpl)))
-        print("\n[Live exception (raw)]:\n", live_raw)
-
-    # Add a raw PEM (string)
-    raw_pem = "NameError: name 'foo' is not defined"
-    raw_tmpl, raw_raw = matcher.add_raw_pem(raw_pem, metadata={"example": "NameError historical"})
-    print("\n[Raw PEM template (canonical)]:\n", raw_tmpl)
-    print("\n[Raw PEM template (display)]:\n", matcher.format_template_for_display(raw_tmpl, matcher.template_db.get(raw_tmpl)))
-    print("\n[Raw PEM (original)]:\n", raw_raw)
-
-    # Add a custom PEM (user-defined exception)
-    matcher.add_raw_pem("CustomAppException: failed to connect", metadata={"example": "custom"})
-
-    # Match a new PEM
-    new_pem = "NameError: name 'bar' is not defined"
-    match, entries = matcher.match_pem(new_pem)
-    print("\n[Match found?]", bool(match))
-    if match:
-        print("[Matched template]:", matcher.format_template_for_display(match, entries))
-        print("[Previous instances]:", entries)
-    else:
-        print("[No match found]")
-
-    # Fuzzy match example
-    almost_pem = "NameError: variable 'baz' isn't defined"
-    match, entries = matcher.match_pem(almost_pem, fuzzy=True)
-    print("\n[Fuzzy match found?]", bool(match))
-    if match:
-        print("[Fuzzy matched template]:", matcher.format_template_for_display(match, entries))
-        print("[Previous instances]:", entries)
-    else:
-        print("[No fuzzy match found]")
+    sys.exit(main())
