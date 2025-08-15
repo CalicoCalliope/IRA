@@ -61,14 +61,14 @@ class PEMTemplateMatcher:
         raw_pem = ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))
         entry = {"pem": raw_pem, "metadata": metadata or {}}
         self.template_db.setdefault(template, []).append(entry)
-        return template
+        return template, raw_pem
 
     # --------- 5. Add raw PEM string to DB -------------------------
     def add_raw_pem(self, raw_pem: str, metadata: Optional[Dict] = None):
         template = self.canonicalize_raw_pem(raw_pem)
         entry = {"pem": raw_pem, "metadata": metadata or {}}
         self.template_db.setdefault(template, []).append(entry)
-        return template
+        return template, raw_pem
 
     # --------- 6. Exact/fuzzy template lookup ----------------------
     def match_pem(self, new_pem: str, fuzzy: bool = False, min_ratio: float = 0.85):
@@ -84,6 +84,45 @@ class PEMTemplateMatcher:
                 match = matches[0]
                 return match, self.template_db[match]
         return None, None
+
+    def _extract_message_from_raw(self, raw: str, exc_type: Optional[str] = None) -> Optional[str]:
+        # Try to find the exception message in the last non-empty line
+        lines = [ln.strip() for ln in raw.strip().splitlines() if ln.strip()]
+        if not lines:
+            return None
+        last = lines[-1]
+        # If exc_type known, prefer that line
+        if exc_type:
+            for ln in reversed(lines):
+                if ln.startswith(f"{exc_type}:"):
+                    last = ln
+                    break
+        if ":" in last:
+            return last.split(":", 1)[1].strip()
+        return last
+
+    def format_template_for_display(self, template: str, entries: Optional[List[Dict]] = None) -> str:
+        # If template ends with '<MSG>', try to substitute a representative message for display
+        lines = template.splitlines()
+        if not lines:
+            return template
+        last = lines[-1]
+        m = re.match(r"^([A-Za-z_][\w]*)\:\s*<MSG>$", last)
+        if m and entries:
+            exc_type = m.group(1)
+            msg = None
+            # Pick the first entry's raw PEM to extract a message
+            raw = None
+            for e in entries:
+                raw = e.get("pem")
+                if raw:
+                    break
+            if raw:
+                msg = self._extract_message_from_raw(raw, exc_type=exc_type)
+            if msg:
+                lines[-1] = f"{exc_type}: {msg}"
+                return "\n".join(lines)
+        return template
 
     def get_all_templates(self) -> List[str]:
         return list(self.template_db.keys())
@@ -102,13 +141,17 @@ if __name__ == "__main__":
         def bar(): 1/0
         foo()
     except Exception as e:
-        template = matcher.add_live_exception(e, metadata={"example": "ZeroDivisionError"})
-        print("\n[Live exception template]:\n", template)
+        live_tmpl, live_raw = matcher.add_live_exception(e, metadata={"example": "ZeroDivisionError"})
+        print("\n[Live exception template (canonical)]:\n", live_tmpl)
+        print("\n[Live exception template (display)]:\n", matcher.format_template_for_display(live_tmpl, matcher.template_db.get(live_tmpl)))
+        print("\n[Live exception (raw)]:\n", live_raw)
 
     # Add a raw PEM (string)
     raw_pem = "NameError: name 'foo' is not defined"
-    template = matcher.add_raw_pem(raw_pem, metadata={"example": "NameError historical"})
-    print("\n[Raw PEM template]:\n", template)
+    raw_tmpl, raw_raw = matcher.add_raw_pem(raw_pem, metadata={"example": "NameError historical"})
+    print("\n[Raw PEM template (canonical)]:\n", raw_tmpl)
+    print("\n[Raw PEM template (display)]:\n", matcher.format_template_for_display(raw_tmpl, matcher.template_db.get(raw_tmpl)))
+    print("\n[Raw PEM (original)]:\n", raw_raw)
 
     # Add a custom PEM (user-defined exception)
     matcher.add_raw_pem("CustomAppException: failed to connect", metadata={"example": "custom"})
@@ -118,7 +161,7 @@ if __name__ == "__main__":
     match, entries = matcher.match_pem(new_pem)
     print("\n[Match found?]", bool(match))
     if match:
-        print("[Matched template]:", match)
+        print("[Matched template]:", matcher.format_template_for_display(match, entries))
         print("[Previous instances]:", entries)
     else:
         print("[No match found]")
@@ -128,7 +171,7 @@ if __name__ == "__main__":
     match, entries = matcher.match_pem(almost_pem, fuzzy=True)
     print("\n[Fuzzy match found?]", bool(match))
     if match:
-        print("[Fuzzy matched template]:", match)
+        print("[Fuzzy matched template]:", matcher.format_template_for_display(match, entries))
         print("[Previous instances]:", entries)
     else:
         print("[No fuzzy match found]")
