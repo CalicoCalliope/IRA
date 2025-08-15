@@ -1,6 +1,5 @@
 import os
 import sys
-import importlib
 import runpy
 
 def _ensure_repo_root_on_syspath():
@@ -23,17 +22,14 @@ def main(argv=None):
     if argv is None:
         argv = sys.argv
     repo_root = _ensure_repo_root_on_syspath()
-    try:
-        mod = importlib.import_module("CuBERT.PEM_matcher")
-    except Exception:
-        script_path = os.path.join(repo_root, "CuBERT", "PEM_matcher.py")
-        _run_fallback(script_path)
-        return 0
-    ret = _try_call_entry(mod, argv)
-    if ret is not None:
-        return 0 if ret in (None, True) else ret
     script_path = os.path.join(repo_root, "CuBERT", "PEM_matcher.py")
-    _run_fallback(script_path)
+    # Run CuBERT/PEM_matcher.py as if executed directly, preserving CLI args
+    old_argv = sys.argv
+    sys.argv = argv
+    try:
+        _run_fallback(script_path)
+    finally:
+        sys.argv = old_argv
     return 0
 
 if __name__ == "__main__":
