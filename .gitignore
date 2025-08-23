@@ -79,3 +79,14 @@ google-research/
 
 # Others
 *.tgzbackups/
+
+# Ignore local backups and temp data
+backups/
+venv-backup-*.tar.gz
+*.bak
+# temp sample dumps
+tests/pem_samples/bulk*.jsonl
+tests/pem_samples/empty.jsonl
+tests/pem_samples/long.jsonl
+tests/pem_samples/malformed.jsonl
+tests/pem_samples/odd_keys.jsonl
