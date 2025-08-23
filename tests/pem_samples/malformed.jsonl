@@ -1,0 +1,5 @@
+{"text": "valid json line"}
+not-json at all
+{"pem": "NameError: name 'x' is not defined"}
+{"text": "unterminated
+{"unknown":"ignored-but-won't-crash"}
