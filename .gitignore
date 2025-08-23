@@ -79,3 +79,8 @@ google-research/
 
 # Others
 *.tgzbackups/
+
+# ignore local backups and dumps
+backups/
+venv-backup-*.tar.gz
+*.bak
