@@ -282,10 +282,11 @@ def ensure_collection(name: str, dim: int, *, strict_dim: bool = False) -> None:
             vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
         )
 
-def store_embedding_in_qdrant(embedding: np.ndarray, payload: dict, *, ensure: bool = True) -> str:
+def store_embedding_in_qdrant(embedding: np.ndarray, payload: dict, *, ensure: bool = True, point_id: Optional[str] = None) -> str:
     """
     Upsert a single point. Ensures collection exists by default (non-destructive).
-    Returns the UUID string of the inserted point.
+    If `point_id` is provided, use it. Otherwise generate a new UUID.
+    Returns the point id as string.
     """
     client = get_qdrant()
     from qdrant_client.models import PointStruct
@@ -296,10 +297,61 @@ def store_embedding_in_qdrant(embedding: np.ndarray, payload: dict, *, ensure: b
     if ensure:
         ensure_collection(COLLECTION_NAME, dim=int(vec.shape[0]), strict_dim=False)
 
-    pid = str(uuid.uuid4())
+    pid = point_id or str(uuid.uuid4())
     point = PointStruct(id=pid, vector=vec.tolist(), payload=payload)
     client.upsert(collection_name=COLLECTION_NAME, points=[point])
     return pid
+
+def fetch_embedding_from_qdrant_by_id(point_id: str) -> Optional[np.ndarray]:
+    """Fetch a stored vector by point id. Returns np.ndarray or None if not found."""
+    client = get_qdrant()
+    try:
+        # Modern qdrant-client exposes `retrieve` with with_vectors flag
+        recs = client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id], with_vectors=True)
+        if not recs:
+            return None
+        rec = recs[0]
+        vec = getattr(rec, "vector", None)
+        if vec is None:
+            # Some versions store vectors under `vectors` or as dict
+            vec = getattr(rec, "vectors", None)
+            if isinstance(vec, dict):
+                # single-vector collections may store under a default key
+                # take the first vector present
+                try:
+                    vec = next(iter(vec.values()))
+                except Exception:
+                    vec = None
+        if vec is None:
+            return None
+        return np.asarray(vec, dtype=np.float32)
+    except Exception:
+        return None
+
+
+def embed_and_store_pem(code_snippet: str, payload: dict, *, pem_id: Optional[str] = None, ensure: bool = True) -> str:
+    """
+    Compute an embedding for the provided local code snippet and upsert it with payload.
+    If `pem_id` is provided, it is used as the point id. Returns the point id used.
+    Intended for ingestion-time use when a PEM is first logged.
+    """
+    emb = get_cubert_embedding(code_snippet)
+    return store_embedding_in_qdrant(emb, payload, ensure=ensure, point_id=pem_id)
+
+
+def get_or_compute_current_embedding(code_snippet: str, *, pem_point_id: Optional[str] = None, reuse: bool = True) -> Tuple[np.ndarray, Optional[str]]:
+    """
+    For the current PEM, attempt to reuse an already-stored embedding if `pem_point_id` is provided
+    and a vector exists. Otherwise compute a fresh embedding now. Returns (embedding, reused_point_id_or_None).
+    This does not store the freshly-computed embedding; the caller may choose to store it after ranking.
+    """
+    if reuse and pem_point_id:
+        vec = fetch_embedding_from_qdrant_by_id(pem_point_id)
+        if vec is not None:
+            return vec, pem_point_id
+    # Fallback: compute now
+    emb = get_cubert_embedding(code_snippet)
+    return emb, None
 
 # ----------------------------
 # example: safe smoke test
@@ -308,7 +360,8 @@ def store_embedding_in_qdrant(embedding: np.ndarray, payload: dict, *, ensure: b
 if __name__ == "__main__":
     try:
         snippet = "c = 1/0"  # trivial snippet to exercise the path
-        emb = get_cubert_embedding(snippet)
+        # Example: try reuse, else compute
+        emb, reused_id = get_or_compute_current_embedding(snippet, pem_point_id=None, reuse=True)
 
         payload = {
             "timestamp": os.getenv("ISO_TIMESTAMP", "2025-08-14T21:38:34.238Z"),
@@ -318,8 +371,9 @@ if __name__ == "__main__":
             "pythonVersion": sys.version.split()[0],
         }
 
-        point_id = store_embedding_in_qdrant(emb, payload, ensure=True)
-        print("Stored point:", point_id)
+        # Store only if we did not reuse an existing vector
+        point_id = reused_id or store_embedding_in_qdrant(emb, payload, ensure=True)
+        print("Stored or reused point:", point_id)
     except Exception as e:
         # Show precise failure cause without noisy tracebacks in normal runs
         print(f"[CuBERT] Example failed: {type(e).__name__}: {e}")
