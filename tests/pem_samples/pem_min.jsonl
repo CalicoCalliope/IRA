@@ -1,2 +1,2 @@
 {"text": "NameError: name 'foo' is not defined"}
-{"text": "ZeroDivisionError: division by zero"}
+{"pem": "ZeroDivisionError: division by zero"}

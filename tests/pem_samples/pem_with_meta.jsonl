@@ -1,3 +1,3 @@
-{"id":"ex-001","source":"unit","text":"KeyError: 'user_id'"}
-{"id":"ex-002","source":"unit","text":"AttributeError: 'NoneType' object has no attribute 'split'"}
-{"id":"ex-003","source":"unit","text":"RuntimeError: CUDA out of memory"}
+{"text": "KeyError: 'id'", "meta": {"file":"a.py", "user":"zi"}}
+{"pem": "ValueError: invalid literal for int()", "origin": "unit-test"}
+{"text": "AttributeError: object has no attribute 'x'", "line": 12}
