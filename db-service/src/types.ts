@@ -4,6 +4,7 @@ export interface PemLogEntry {
   pem: string;
   pemType: string;
   pemSkeleton: string;
+  code: string;
   username: string;
   activeFile: string;
   workingDirectory: string;
@@ -15,15 +16,5 @@ export interface PemLogEntry {
     hint?: string;
     reasoning?: string;
     answer?: string;
-  };
-}
-
-export interface EmbeddingPoint {
-  id: string;
-  vector: number[];
-  payload: {
-    timestamp: string;
-    username: string;
-    pemType: string;
   };
 }

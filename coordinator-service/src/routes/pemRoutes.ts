@@ -1,36 +1,69 @@
+// coordinator/src/routes/pemRoutes.ts
 import { Router } from "express";
-import { savePemLog } from "../services/dbService";
-import { getEmbedding } from "../services/embedderService";
-import { getSimilarPEMs } from "../services/rankingService";
+import dbService from "../services/dbService";
+// import embedderService from "../services/embedderService";
 import { PemLogEntry } from "../types";
 
 const router = Router();
 
-router.post("/log", async (req, res) => {
+/**
+ * Handle new PEM from the extension
+ * - Generate UID
+ * - Save to DB
+ * - Send to embedder
+ */
+router.post("/handlePEM", async (req, res) => {
   try {
-    const entry: PemLogEntry = req.body;
+    const { pem, metadata } = req.body;
 
-    // Call embedder to enrich entry with embeddings
-    const embedding = await getEmbedding(entry.pem);
-    console.log("[Coordinator] Got embedding length:", embedding.length);
+    if (!pem || !metadata) {
+      return res.status(400).json({ error: "pem and metadata are required" });
+    }
 
-    // Save entry in DB (metadata + embedding separately)
-    const saved = await savePemLog({ ...entry });
-    res.json({ success: true, saved });
+    // 1️⃣ Generate a UID for this PEM
+    const pemId = crypto.randomUUID();
+
+    // 2️⃣ Save PEM + metadata to Mongo via dbService
+    const pemEntry: PemLogEntry = { id: pemId, ...metadata, pem };
+    await dbService.savePemLog(pemEntry);
+
+    // 3️⃣ Send PEM + UID to embedder service (placeholder for now)
+    // await embedderService.embedAndStore({ id: pemId, pem, metadata });
+
+    res.json({ status: "ok", id: pemId });
   } catch (err: any) {
-    console.error("[Coordinator Error]", err.message);
-    res.status(500).json({ error: "Failed to log PEM" });
+    console.error("[Coordinator /handlePEM] Error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-router.get("/similar/:id", async (req, res) => {
+/**
+ * Optional: Get PEM by ID
+ */
+router.get("/:id", async (req, res) => {
   try {
-    const pemId = req.params.id;
-    const results = await getSimilarPEMs(pemId);
-    res.json(results);
+    const pem = await dbService.getPemLog(req.params.id);
+    res.json({ status: "ok", data: pem });
   } catch (err: any) {
-    console.error("[Coordinator Error]", err.message);
-    res.status(500).json({ error: "Failed to fetch similar PEMs" });
+    console.error("[Coordinator GET /pems/:id] Error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Optional: List PEMs with filters
+ */
+router.get("/", async (req, res) => {
+  try {
+    const filters = {
+      username: req.query.username as string | undefined,
+      pemType: req.query.pemType as string | undefined,
+    };
+    const pems = await dbService.getPemsByFilter(filters);
+    res.json({ status: "ok", data: pems });
+  } catch (err: any) {
+    console.error("[Coordinator GET /pems] Error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 

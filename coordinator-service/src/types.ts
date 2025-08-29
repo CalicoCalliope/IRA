@@ -4,6 +4,7 @@ export interface PemLogEntry {
   pem: string;
   pemType: string;
   pemSkeleton: string;
+  code: string;
   username: string;
   activeFile: string;
   workingDirectory: string;
