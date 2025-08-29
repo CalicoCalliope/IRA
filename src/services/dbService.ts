@@ -1,63 +1,57 @@
 import axios from "axios";
-import { PemLogEntry, EmbeddingPoint } from "../types";
+import { PemLogEntry } from "../types";
 
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || "http://localhost:4000";
 
-
-/**
- * =====================
- * PEM Metadata (MongoDB)
- * =====================
- */
-
-export async function savePemLog(entry: PemLogEntry) {
-  const res = await axios.post(`${DB_SERVICE_URL}/pems`, entry);
-  return res.data;
+interface SavePemResponse {
+  status: string;
+  id: string;
 }
 
-export async function getPemLog(id: string) {
-  const res = await axios.get(`${DB_SERVICE_URL}/pems/${id}`);
-  return res.data;
+interface GetPemResponse {
+  status: string;
+  data: PemLogEntry;
 }
 
-export async function getPemsByUser(username: string) {
-  return (await axios.get(`${DB_SERVICE_URL}/pems`, { params: { username } })).data;
+interface GetPemsResponse {
+  status: string;
+  data: PemLogEntry[];
 }
 
-export async function getPemsByType(pemType: string) {
-  return (await axios.get(`${DB_SERVICE_URL}/pems`, { params: { pemType } })).data;
+interface GenericStatusResponse {
+  status: string;
 }
 
-export async function getPemsByUserAndType(pemType: string, username: string) {
-  return (await axios.get(`${DB_SERVICE_URL}/pems`, { params: { username, pemType } })).data;
-}
+const dbService = {
+  async savePemLog(entry: PemLogEntry): Promise<SavePemResponse> {
+    const res = await axios.post<SavePemResponse>(`${DB_SERVICE_URL}/pems`, entry);
+    return res.data;
+  },
 
-export async function updatePemLog(id: string, updates: Partial<PemLogEntry>) {
-  return (await axios.patch(`${DB_SERVICE_URL}/pems/${id}`, updates)).data;
-}
+  async getPemLog(id: string): Promise<PemLogEntry> {
+    const res = await axios.get<GetPemResponse>(`${DB_SERVICE_URL}/pems/${id}`);
+    return res.data.data;
+  },
 
-export async function deletePemLog(id: string) {
-  return (await axios.delete(`${DB_SERVICE_URL}/pems/${id}`)).data;
-}
+  async getPemsByFilter(filters: { username?: string; pemType?: string } = {}): Promise<PemLogEntry[]> {
+    const res = await axios.get<GetPemsResponse>(`${DB_SERVICE_URL}/pems`, { params: filters });
+    return res.data.data;
+  },
 
-/**
- * =====================
- * Embeddings (Qdrant)
- * =====================
- */
-export async function saveEmbedding(entry: EmbeddingPoint) {
-  return (await axios.post(`${DB_SERVICE_URL}/embeddings`, entry)).data;
-}
+  async updatePemLog(id: string, updates: Partial<PemLogEntry>): Promise<GenericStatusResponse> {
+    const res = await axios.patch<GenericStatusResponse>(`${DB_SERVICE_URL}/pems/${id}`, updates);
+    return res.data;
+  },
 
-export async function getEmbedding(pemId: string) {
-  return (await axios.get(`${DB_SERVICE_URL}/embeddings/${pemId}`)).data;
-}
-  
-/**
- * =====================
- * Healthcheck / Utility
- * =====================
- */
-export async function pingDb() {
-  return (await axios.get(`${DB_SERVICE_URL}/health`)).data;
-}
+  async deletePemLog(id: string): Promise<GenericStatusResponse> {
+    const res = await axios.delete<GenericStatusResponse>(`${DB_SERVICE_URL}/pems/${id}`);
+    return res.data;
+  },
+
+  async pingDb(): Promise<GenericStatusResponse> {
+    const res = await axios.get<GenericStatusResponse>(`${DB_SERVICE_URL}/health`);
+    return res.data;
+  },
+};
+
+export default dbService;
