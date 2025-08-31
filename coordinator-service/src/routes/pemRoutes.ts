@@ -20,14 +20,14 @@ router.post("/handlePEM", async (req, res) => {
       return res.status(400).json({ error: "pem and metadata are required" });
     }
 
-    // 1️⃣ Generate a UID for this PEM
+    // Generate a UID for this PEM
     const pemId = crypto.randomUUID();
 
-    // 2️⃣ Save PEM + metadata to Mongo via dbService
+    // Save PEM + metadata to Mongo via dbService
     const pemEntry: PemLogEntry = { id: pemId, ...metadata, pem };
     await dbService.savePemLog(pemEntry);
 
-    // 3️⃣ Send PEM + UID to embedder service (placeholder for now)
+    // Send PEM + UID to embedder service (placeholder for now)
     // await embedderService.embedAndStore({ id: pemId, pem, metadata });
 
     res.json({ status: "ok", id: pemId });

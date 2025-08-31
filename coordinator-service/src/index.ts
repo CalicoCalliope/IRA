@@ -4,6 +4,7 @@ import crypto from "crypto";
 import dbService from "./services/dbService";
 // import { embedderService } from "./services/embedderService";
 import pemRoutes from "./routes/pemRoutes";
+import rankingRoutes from "./routes/rankingRoutes";
 import { PemLogEntry } from "./types";
 
 dotenv.config();
@@ -13,6 +14,7 @@ app.use(express.json());
 
 // Routes
 app.use("/pems", pemRoutes);
+app.use("/ranking", rankingRoutes);
 
 // Main entrypoint for PEMs
 app.post("/handlePEM", async (req, res) => {
