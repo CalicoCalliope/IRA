@@ -53,3 +53,8 @@ tmp/
 # Project specifics
 ira/node_modules/
 ira/dist/
+
+# Vendor guard: ignore google-research except the CuBERT subtree
+google-research/*
+!google-research/cubert/
+!google-research/cubert/**
