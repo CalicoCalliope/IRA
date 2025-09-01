@@ -9,7 +9,9 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": ["onLanguage:python"],
+  "activationEvents": [
+    "onLanguage:python"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -17,7 +19,23 @@
         "command": "IRA.runPythonAndCaptureErrors",
         "title": "Run Python and Log Runtime Errors"
       }
-    ]
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "IRA",
+      "properties": {
+        "ira.coordinatorEndpoint": {
+          "type": "string",
+          "default": "http://localhost:5000",
+          "description": "Base URL of the coordinator service, TEMPORARY FOR LOCAL DEV RN."
+        },
+        "ira.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for coordinator authentication (replace with VM URL when deployed)."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
@@ -36,7 +54,7 @@
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@types/node": "20.x",
-    "@types/vscode": "^1.102.0",
+    "@types/vscode": "^1.103.0",
     "@typescript-eslint/eslint-plugin": "^8.31.1",
     "@typescript-eslint/parser": "^8.31.1",
     "@vscode/test-cli": "^0.0.11",
