@@ -2,8 +2,30 @@
 
 Goal: run embeddings locally without asking users to install anything.
 
+## Quick start (manual test)
+
+```bash
+# 1) create and activate a local venv
+python3 -m venv .ira/.venv
+source .ira/.venv/bin/activate
+pip install -U pip setuptools wheel
+pip install -r requirements.txt
+
+# 2) health check (prints JSON)
+PYTHONPATH="$(pwd)/google-research" python - <<'PY'
+import json, ira.cubert_pipeline as m
+print(json.dumps(m.health()))
+PY
+
+# 3) one-shot embed example (prints a vector)
+PYTHONPATH="$(pwd)/google-research" python - <<'PY'
+from ira.cubert_pipeline import get_cubert_embedding
+print(get_cubert_embedding("def add(a,b): return a+b").tolist())
+PY
+```
+
 ## What the coordinator must do
-1) Create and reuse a managed venv in the repo, then install deps from `requirements.txt`.
+1) Create and reuse a managed venv in the repo, then install dependencies from `requirements.txt`.
 2) Run a health check before use and show a friendly status.
 3) Call a one-shot Python snippet to compute embeddings, or run a tiny Python service later.
 
