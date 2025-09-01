@@ -18,11 +18,35 @@ import os
 import sys
 import uuid
 
+# Ensure google-research is on sys.path so cubert.* imports work reliably
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_GOOGLE_RESEARCH = _REPO_ROOT / "google-research"
+if str(_GOOGLE_RESEARCH) not in sys.path:
+    sys.path.insert(0, str(_GOOGLE_RESEARCH))
+
 import numpy as np
-import torch
+# Lazy/optional heavy deps so import of this module works without them.
+try:
+    import torch  # type: ignore
+except Exception:
+    torch = None  # type: ignore
+# Provide a decorator that is a no-op if torch is unavailable
+try:
+    _inference_mode = torch.inference_mode  # type: ignore[attr-defined]
+except Exception:
+    def _inference_mode():
+        def _decorator(fn):
+            return fn
+        return _decorator
+try:
+    from transformers import AutoModel  # type: ignore
+except Exception:
+    AutoModel = None  # type: ignore
+try:
+    import sentencepiece as spm  # type: ignore
+except Exception:
+    spm = None  # type: ignore
 from dotenv import load_dotenv
-from transformers import AutoModel
-import sentencepiece as spm
 
 # ----------------------------
 # configuration & environment
@@ -33,7 +57,7 @@ load_dotenv(override=True)  # read .env if present; prefer values from .env over
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Paths to google-research/cubert (for PythonTokenizer) and the SentencePiece model
-CUBERT_SRC = Path(os.getenv("CUBERT_SRC", REPO_ROOT / "google-research" / "cubert"))
+CUBERT_SRC = Path(os.getenv("CUBERT_SRC", _GOOGLE_RESEARCH / "cubert"))
 SPM_PATH   = Path(os.getenv("CUBERT_SPM", REPO_ROOT / "cubert_python_tokenizer.spm"))
 
 # Model / runtime
@@ -61,7 +85,7 @@ COLLECTION_NAME  = os.getenv("COLLECTION_NAME", "ira-pem-logs")
 # ----------------------------
 
 _python_tokenizer_cls = None          # type: ignore
-_sp_model: Optional[spm.SentencePieceProcessor] = None
+_sp_model = None  # type: ignore  # set when sentencepiece is available
 _model: Optional[AutoModel] = None
 _qdrant_client = None
 _hf_tok = None  # HuggingFace tokenizer fallback (lazy)
@@ -93,9 +117,13 @@ def load_python_tokenizer_cls():
         _python_tokenizer_cls = PythonTokenizer
     return _python_tokenizer_cls
 
-def load_sp() -> spm.SentencePieceProcessor:
+def load_sp() -> "spm.SentencePieceProcessor":
     """Load the SentencePiece model lazily."""
     global _sp_model
+    if spm is None:
+        raise ImportError(
+            "sentencepiece is not installed. Install with `pip install sentencepiece`."
+        )
     if _sp_model is None:
         if not SPM_PATH.exists():
             raise FileNotFoundError(
@@ -109,16 +137,17 @@ def load_sp() -> spm.SentencePieceProcessor:
 
 def _resolve_device(pref: str) -> str:
     """Return the best available device given a preference, with safe fallbacks."""
+    # If torch is unavailable, always fall back to CPU
+    if torch is None:
+        return "cpu"
     pref = (pref or "cpu").lower()
     if pref.startswith("cuda"):
         if torch.cuda.is_available():
             return pref
-        # fall back from e.g. cuda:0 to cuda if available, else CPU
         if torch.cuda.is_available():
             return "cuda"
         return "cpu"
     if pref == "mps":
-        # Apple Metal backend (macOS), best effort
         try:
             if torch.backends.mps.is_available():  # type: ignore[attr-defined]
                 return "mps"
@@ -127,12 +156,29 @@ def _resolve_device(pref: str) -> str:
         return "cpu"
     return "cpu"
 
-def load_model() -> AutoModel:
+def load_model() -> "AutoModel":
     """Load the transformer model lazily and move it to the chosen device."""
-    global _model
+    global _model, torch, AutoModel
     if _model is None:
+        # Import heavy deps lazily so module import doesn't fail without them
+        if AutoModel is None:
+            try:
+                from transformers import AutoModel as _AutoModel  # type: ignore
+                AutoModel = _AutoModel  # type: ignore
+            except Exception as exc:
+                raise ImportError(
+                    "transformers is not installed. Install with `pip install transformers`."
+                ) from exc
+        if torch is None:
+            try:
+                import torch as _torch  # type: ignore
+                torch = _torch  # type: ignore
+            except Exception as exc:
+                raise ImportError(
+                    "PyTorch is not installed. Install with `pip install torch` (or the platform-specific wheel)."
+                ) from exc
         try:
-            m = AutoModel.from_pretrained(MODEL_NAME)
+            m = AutoModel.from_pretrained(MODEL_NAME)  # type: ignore
             m.eval()
         except Exception as exc:
             raise RuntimeError(
@@ -148,12 +194,17 @@ def load_model() -> AutoModel:
         _model = m
     return _model
 
-def get_model_device(model: AutoModel) -> torch.device:
+def get_model_device(model: "AutoModel"):
     # find a parameter tensor to query target device
     try:
-        return next(model.parameters()).device
+        if hasattr(model, "parameters"):
+            return next(model.parameters()).device
     except Exception:
-        return torch.device("cpu")
+        pass
+    # Fallback CPU device-like value
+    class _CPU:
+        type = "cpu"
+    return _CPU()
 
 def load_hf_tokenizer():
     """Lazy-load HuggingFace tokenizer as a fallback or primary path.
@@ -198,7 +249,7 @@ def pad_truncate(ids: List[int], max_len: int) -> Tuple[List[int], List[int]]:
 # embedding
 # ----------------------------
 
-@torch.inference_mode()
+@_inference_mode()
 def get_cubert_embedding(code_snippet: str) -> np.ndarray:
     """
     Convert code into a single embedding (CLS token vector).

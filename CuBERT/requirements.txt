@@ -1,6 +1,0 @@
-transformers
-torch
-qdrant-client
-python-dotenv
-absl-py
-six
