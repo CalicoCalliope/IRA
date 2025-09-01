@@ -58,3 +58,7 @@ ira/dist/
 google-research/*
 !google-research/cubert/
 !google-research/cubert/**
+
+# Vendor cubert caches
+google-research/cubert/**/__pycache__/
+google-research/cubert/**/*.py[co]
