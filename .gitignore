@@ -1,86 +1,55 @@
-# Node.js dependencies
-node_modules/
-**/node_modules/
+# OS
+.DS_Store
+Thumbs.db
 
-# Build outputs and artifacts
-build/
-dist/
-**/dist/
-out/
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Environment variables and secrets
-.env
-.env.*
-*.env
-.env.local
-.env.*.local
-
-# Python artifacts and virtual environments
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-*.egg-info/
-.eggs/
+*.so
+.pytype/
+.mypy_cache/
 .pytest_cache/
-.ipynb_checkpoints/
-**/__pycache__/
 .venv/
-.venv*/
 venv/
-*.pkl  # Python build cache
+env/
+pip-wheel-metadata/
+htmlcov/
+.coverage
+.coverage.*
+.cache/
 
-# VS Code and IDE files
-.vscode/
-.history/
-.idea/
-**/.vscode/
-*.code-workspace
-
-# OS and system files
-.DS_Store
-.AppleDouble
-.LSOverride
-.Spotlight-V100
-.Trashes
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-# TypeScript cache
-*.tsbuildinfo
-
-# Coverage and test results
+# Node and web
+node_modules/
+dist/
+build/
+out/
 coverage/
-*.lcov
+.parcel-cache/
+.next/
+.turbo/
+.cache/
+.eslintcache
+*.log
 
-# Temporary files
-tmp/
-temp/
+# Editors and IDEs
+.vscode/
+.idea/
 
-# Qdrant local data
-qdrant_storage/
-snapshots/
-
-# CuBERT vendor and large artifacts
-google-research/
-**/google-research/
-*.spm
-
-# Source maps (optional)
-*.map
-
-# Others
-*.tgzbackups/
-
-# ignore local backups and dumps
+# Env and backups
+.env
+*.env*
+!*.env.example
 backups/
 venv-backup-*.tar.gz
+
+# Misc
+tmp/
 *.bak
+*.swp
+*.swo
+
+# Project specifics
+ira/node_modules/
+ira/dist/
