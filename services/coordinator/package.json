@@ -5,8 +5,7 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "tsx src/index.ts",
-    "start": "node --env-file=.env --enable-source-maps --no-warnings=ExperimentalWarning --loader tsx src/index.ts",
-    "health": "curl -s http://127.0.0.1:${PORT:-8000}/health | jq . || curl -s http://127.0.0.1:${PORT:-8000}/health"
+    "start": "node --env-file=.env --enable-source-maps --no-warnings=ExperimentalWarning --loader tsx src/index.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
