@@ -1,0 +1,21 @@
+{
+  "name": "@ira/coordinator",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "node --env-file=.env --enable-source-maps --no-warnings=ExperimentalWarning --loader tsx src/index.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.12.12",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4"
+  }
+}
