@@ -1,0 +1,3 @@
+openapi: 3.0.3
+info: { title: Embedder API, version: 0.0.1 }
+paths: {}
