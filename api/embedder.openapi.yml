@@ -1,3 +1,48 @@
 openapi: 3.0.3
-info: { title: Embedder API, version: 0.0.1 }
-paths: {}
+info:
+  title: Embedder API
+  version: 0.1.0
+paths:
+  /health:
+    get:
+      summary: Health status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cubert_src: { type: string }
+                  cubert_src_exists: { type: boolean }
+                  spm_path: { type: string }
+                  spm_exists: { type: boolean }
+                  use_hf_only: { type: boolean }
+                  model_name: { type: string }
+  /embed:
+    post:
+      summary: Compute embedding
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+              required: [text]
+      responses:
+        '200':
+          description: Embedding vector
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  vector:
+                    type: array
+                    items: { type: number }
+                  dim:
+                    type: integer
