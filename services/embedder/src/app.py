@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 # Import your existing pipeline (has its own google-research path shim)
-import services.embedder.src.cubert_pipeline as pipe  # type: ignore
+from . import cubert_pipeline as pipe  # type: ignore
 
 app = FastAPI(title="Embedder Service", version="0.1.0")
 

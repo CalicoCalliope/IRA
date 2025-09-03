@@ -7,7 +7,7 @@ BASE_URL = "http://127.0.0.1:8001"  # your embedder service
 
 @pytest.fixture(scope="session")
 def client():
-    return httpx.Client(base_url=BASE_URL)
+    return httpx.Client(base_url=BASE_URL, timeout=60.0)
 
 
 def test_health(client):
@@ -19,7 +19,7 @@ def test_health(client):
 
 
 def test_embed_and_filter(client):
-    pem_id = "test-123"
+    pem_id = "testuser_001"
     username = "testuser"
     pem_type = "SyntaxError"
     timestamp = int(time.time())
@@ -35,8 +35,8 @@ def test_embed_and_filter(client):
     assert r.status_code == 200
     data = r.json()
     assert data["id"] == pem_id
-    assert data["dim"] == 512
-    assert len(data["vector"]) == 512
+    assert data["dim"] == 768
+    assert len(data["vector"]) == 768
 
     # Step 2: Filter embeddings by username
     r = client.get("/filter", params={"username": username})

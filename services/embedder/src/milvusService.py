@@ -1,6 +1,7 @@
 import os
 from pymilvus import MilvusClient, DataType, FieldSchema, CollectionSchema
 from dotenv import load_dotenv
+import numpy as np
 
 # -----------------------------
 # Load environment variables
@@ -22,7 +23,7 @@ client = MilvusClient(uri=MILVUS_URI, token=MILVUS_TOKEN)
 if COLLECTION_NAME not in client.list_collections():
     fields = [
         FieldSchema(name="PK", dtype=DataType.VARCHAR, is_primary=True, max_length=50),
-        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=512),
+        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=768),
         FieldSchema(name="timestamp", dtype=DataType.INT64),
         FieldSchema(name="username", dtype=DataType.VARCHAR, max_length=50),
         FieldSchema(name="pem_type", dtype=DataType.VARCHAR, max_length=100),
@@ -35,9 +36,16 @@ if COLLECTION_NAME not in client.list_collections():
 # Insert an embedding
 # -----------------------------
 def insert_embedding(vector, pem_id: str, username: str, pem_type: str, timestamp: int):
+    vec = np.array(vector, dtype=np.float32)
+    print("VECTOR DIM:", len(vector))
+    print("VECTOR TYPE:", type(vector), type(vector[0]))
+    print("PK TYPE:", type(pem_id))
+    print("USERNAME TYPE:", type(username))
+    print("PEM_TYPE TYPE:", type(pem_type))
+    print("TIMESTAMP TYPE:", type(timestamp))
     client.insert(COLLECTION_NAME, [
         [pem_id],        # PK
-        [vector],        # embedding
+        [list(vector)],        # embedding
         [timestamp],     # INT64
         [username],      # VARCHAR
         [pem_type]       # VARCHAR
