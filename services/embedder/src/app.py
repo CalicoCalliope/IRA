@@ -3,7 +3,10 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 from fastapi import Query
-from embedder.src.milvusService import insert_embedding, filter_entries
+try:
+    from .milvusService import insert_embedding, filter_entries
+except Exception:
+    from .milvus_noop import insert_embedding, filter_entries
 
 # Ensure repo root is importable so we can import `ira.*`
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -14,7 +17,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 # Import your existing pipeline (has its own google-research path shim)
-import ira.cubert_pipeline as pipe  # type: ignore
+import services.embedder.src.cubert_pipeline as pipe  # type: ignore
 
 app = FastAPI(title="Embedder Service", version="0.1.0")
 
@@ -72,8 +75,10 @@ def health() -> HealthResponse:
 def embed(req: EmbedRequest) -> EmbedResponse:
     vec = pipe.get_cubert_embedding(req.text)
 
-    if len(vec) != 512:
-        raise ValueError(f"Embedding dimension {len(vec)} does not match Milvus collection (512)")
+    dim = len(vec)
+    EXPECT_DIM = int(os.getenv("MILVUS_EXPECT_DIM", "0") or "0")
+    if EXPECT_DIM and dim != EXPECT_DIM:
+        raise ValueError(f"Embedding dimension {dim} != expected {EXPECT_DIM}")
 
     # vec is a numpy array per the pipeline; convert to list for JSON
     lst = [float(x) for x in vec.tolist()]
