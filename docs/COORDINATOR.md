@@ -19,7 +19,7 @@ PY
 
 # 3) one-shot embed example (prints a vector)
 PYTHONPATH="$(pwd)/google-research" python - <<'PY'
-from ira.cubert_pipeline import get_cubert_embedding
+from services.embedder.src.cubert_pipeline import get_cubert_embedding  # dev only; prefer calling the service via coordinator
 print(get_cubert_embedding("def add(a,b): return a+b").tolist())
 PY
 ```
@@ -83,7 +83,7 @@ export function embedOnce(vpy: string, repoRoot: string, code: string) {
   const env = { ...process.env, PYTHONPATH: join(repoRoot, "google-research") };
   const py = `
 import json, sys
-from ira.cubert_pipeline import get_cubert_embedding
+from services.embedder.src.cubert_pipeline import get_cubert_embedding  # dev only; prefer calling the service via coordinator
 src = sys.stdin.read()
 vec = get_cubert_embedding(src)
 print(json.dumps(vec.tolist()))

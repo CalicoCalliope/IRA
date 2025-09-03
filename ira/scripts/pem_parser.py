@@ -10,7 +10,33 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from ira.cubert_pipeline import get_cubert_embedding  # noqa: E402
+import os, sys
+from pathlib import Path
+
+# Ensure repo root is importable so we can import the service pipeline directly in dev
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    # Dev-only local import; prefer calling the embedder service in production.
+    from services.embedder.src.cubert_pipeline import get_cubert_embedding  # type: ignore
+except Exception:
+    # Fallback: call the embedder service over HTTP (via coordinator or direct)
+    import json, urllib.request
+    EMBEDDER_URL = os.getenv("EMBEDDER_URL", "http://127.0.0.1:8001")
+    def get_cubert_embedding(text: str):
+        payload = {"id":"adhoc","username":"local","pemType":"code","timestamp":0,"text":text}
+        req = urllib.request.Request(
+            f"{EMBEDDER_URL}/embed",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"content-type":"application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return data["vector"]
+
 
 
 def _iter_jsonl(path: str) -> Iterable[Dict[str, Any]]:
