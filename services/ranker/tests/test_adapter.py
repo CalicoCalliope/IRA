@@ -1,5 +1,5 @@
 import pytest
-from services.ranking.app.adapter import rank_items, _cosine
+from src.adapter import rank_items, _cosine
 
 def test_rank_items_minimal_cosine():
     current = [1.0, 0.0, 0.0]
