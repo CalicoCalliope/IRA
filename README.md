@@ -92,3 +92,5 @@ See: [`/docs/schedule.pdf`](./docs/schedule.pdf)
 - /docs/          → Research context, references, and architecture diagrams
 - /tests/         → Evaluation tools and data collection scripts
 “n##
+
+See safety snapshot: safety-service-embedding-pipeline-2025-09-01-221438
