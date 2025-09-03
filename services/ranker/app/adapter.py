@@ -56,8 +56,8 @@ def rank_items(input_data: Dict[str, Any]) -> Dict[str, Any]:
                 "scores": {cid: float(s) for cid, s in scores}}
 
     # ---- Full path (Pydantic models + our ranker)
-    from src.schemas import RankParams, QueryContext, Candidate, RankRequest
-    from src.ranker import rank as rank_impl
+    from .schemas import RankParams, QueryContext, Candidate, RankRequest
+    from .ranker import rank as rank_impl
 
     # Build QueryContext: only include supported fields, fill safe defaults.
     q_fields = getattr(QueryContext, "model_fields", {})
