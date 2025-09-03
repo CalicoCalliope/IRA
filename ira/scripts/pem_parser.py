@@ -1,113 +1,104 @@
-import os
-import sys
-import argparse
-import json
-from typing import Iterable, Dict, Any, List
+import re
+import traceback
+import builtins
+from typing import List, Dict, Optional
 
-# Ensure the repo root is on sys.path so `ira` package is importable when
-# running this file directly (python ira/scripts/pem_parser.py ...)
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+class PEMTemplateMatcher:
+    """
+    Canonicalize and match Python error messages (PEMs).
+    Supports live exceptions and raw PEM logs.
+    """
 
-from ira.cubert_pipeline import get_cubert_embedding  # noqa: E402
+    def __init__(self, extra_exceptions: Optional[List[str]] = None):
+        # Gather all built-in exception names
+        self.exception_names = set(
+            obj.__name__ for obj in vars(builtins).values()
+            if isinstance(obj, type) and issubclass(obj, BaseException)
+        )
+        # Add user-supplied/custom exception names
+        if extra_exceptions:
+            self.exception_names.update(extra_exceptions)
 
+        # Template DB: canonical template -> list of raw PEMs and metadata
+        self.template_db: Dict[str, List[Dict]] = {}
 
-def _iter_jsonl(path: str) -> Iterable[Dict[str, Any]]:
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                yield json.loads(line)
-            except json.JSONDecodeError:
-                # Be forgiving: treat the whole line as a raw text sample
-                yield {"text": line}
+    # --------- 1. Manual/regex masking for common patterns ----------
+    @staticmethod
+    def manual_masking(pem: str) -> str:
+        pem = re.sub(r"name '.*?' is not defined", "name '<VAR>' is not defined", pem)
+        pem = re.sub(r"line \d+", "line <NUM>", pem)
+        pem = re.sub(r'File ".*?"', 'File "<PATH>"', pem)
+        pem = re.sub(r"in [a-zA-Z_][\w]*", "in <FUNC>", pem)
+        pem = re.sub(r"'[A-Za-z0-9_]+'", "'<STR>'", pem)  # quoted variable/values
+        pem = re.sub(r"\d+\.\d+|\d+", "<NUM>", pem)        # standalone numbers
+        return pem
 
+    # --------- 2. Auto-mask all built-in/custom exceptions ----------
+    def exception_masking(self, pem: str) -> str:
+        for exc_name in self.exception_names:
+            pem = re.sub(fr"{exc_name}:.*", f"{exc_name}: <MSG>", pem)
+        return pem
 
-def _load_items(input_path: str | None, limit: int | None) -> List[Dict[str, Any]]:
-    if not input_path:
-        # Tiny built-in sample
-        samples = [
-            {"text": "NameError: name 'foo' is not defined"},
-            {"text": "ZeroDivisionError: division by zero"},
-        ]
-        return samples[: limit or len(samples)]
+    # --------- 3. Canonicalize raw PEM string (combine both) --------
+    def canonicalize_raw_pem(self, raw_pem: str) -> str:
+        pem = self.manual_masking(raw_pem)
+        pem = self.exception_masking(pem)
+        return pem.strip()
 
-    if not os.path.exists(input_path):
-        print(f"[PEM] Input not found: {input_path}")
-        return []
+    # --------- 4. Canonicalize live exception using traceback -------
+    @staticmethod
+    def canonicalize_traceback(tb_list, exc_type):
+        skeleton = []
+        for frame in tb_list:
+            skeleton.append('File "<PATH>", line <NUM>, in <FUNC>')
+        skeleton.append(f"{exc_type}: <MSG>")
+        return "\n".join(skeleton)
 
-    items: List[Dict[str, Any]] = []
-    for obj in _iter_jsonl(input_path):
-        # Accept either {"text": ...} or {"pem": ...}; prefer explicit text
-        text = obj.get("text") or obj.get("pem")
-        if not text:
-            continue
-        items.append({"text": text, "meta": {k: v for k, v in obj.items() if k not in ("text", "pem")}})
-        if limit and len(items) >= limit:
-            break
-    return items
+    def add_live_exception(self, exception: Exception, metadata: Optional[Dict] = None):
+        tb_list = traceback.extract_tb(exception.__traceback__)
+        exc_type = type(exception).__name__
+        template = self.canonicalize_traceback(tb_list, exc_type)
+        raw_pem = ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))
+        entry = {"pem": raw_pem, "metadata": metadata or {}}
+        self.template_db.setdefault(template, []).append(entry)
+        return template
 
+    # --------- 5. Add raw PEM string to DB -------------------------
+    def add_raw_pem(self, raw_pem: str, metadata: Optional[Dict] = None):
+        template = self.canonicalize_raw_pem(raw_pem)
+        entry = {"pem": raw_pem, "metadata": metadata or {}}
+        self.template_db.setdefault(template, []).append(entry)
+        return template
 
-def run_pipeline(args: argparse.Namespace) -> int:
-    items = _load_items(args.input, args.limit)
-    if not items:
-        # Already printed a friendly message if path was missing; otherwise silent.
-        return 1 if args.input else 0
+    # --------- 6. Exact/fuzzy template lookup ----------------------
+    def match_pem(self, new_pem: str, fuzzy: bool = False, min_ratio: float = 0.85):
+        import difflib
+        new_template = self.canonicalize_raw_pem(new_pem)
+        # Exact match
+        if new_template in self.template_db:
+            return new_template, self.template_db[new_template]
+        # Fuzzy match (optional)
+        if fuzzy:
+            matches = difflib.get_close_matches(new_template, self.template_db.keys(), n=1, cutoff=min_ratio)
+            if matches:
+                match = matches[0]
+                return match, self.template_db[match]
+        return None, None
 
-    batch_size = int(args.batch_size)
-    produced = 0
+    def get_all_templates(self) -> List[str]:
+        return list(self.template_db.keys())
 
-    print(f"[PEM] Loaded {len(items)} item(s). Batch size={batch_size}")
+    def clear_db(self):
+        self.template_db.clear()
 
-    # Simple sequential loop; swap for real batching later if needed
-    for it in items:
-        text = it["text"]
-        _ = get_cubert_embedding(text)
-        produced += 1
-
-    print(f"[PEM] Produced {produced} embedding(s).")
-
-    if not args.commit:
-        print("[PEM] --commit not provided; skipping MongoDB writes.")
-    else:
-        # Placeholder for future DB writes
-        print("[PEM] --commit provided, but DB integration is not enabled in this script yet.")
-
-    return 0
-
-
-def build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="pem_parser",
-        description="Run CuBERT/CodeBERT PEM pipeline to produce embeddings.",
-    )
-    p.add_argument("--input", help="Path to input JSONL with {text: ...} (or {pem: ...}).", default=None)
-    p.add_argument("--limit", type=int, default=0, help="Max number of items to process (0 = no limit).")
-    p.add_argument("--batch-size", type=int, default=32, help="Batch size (reserved; current loop is sequential).")
-    p.add_argument("--dry-run", action="store_true", help="Parse args and exit without executing the pipeline.")
-    p.add_argument("--commit", action="store_true", help="Future: write results to DB (currently no-op).")
-    return p
-
-
-def main(argv: List[str] | None = None) -> int:
-    if argv is None:
-        argv = sys.argv[1:]
-    parser = build_arg_parser()
-    args = parser.parse_args(argv)
-
-    if args.dry_run:
-        print("PEM pipeline dry-run: arguments parsed; no execution.")
-        return 0
-
-    # Normalize limit
-    if args.limit and args.limit < 0:
-        args.limit = 0
-
-    return run_pipeline(args)
-
+# ------------------ EXAMPLE USAGE ------------------
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import sys
+    import json
+
+    pem_input = sys.stdin.read()
+    matcher = PEMTemplateMatcher(extra_exceptions=["CustomAppException"])
+    skeleton = matcher.canonicalize_raw_pem(pem_input)
+
+    print(json.dumps({"pemSkeleton": skeleton}))
