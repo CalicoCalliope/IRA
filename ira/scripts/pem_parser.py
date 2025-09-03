@@ -10,7 +10,21 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from ira.cubert_pipeline import get_cubert_embedding  # noqa: E402
+try:
+    from services.embedder.src.cubert_pipeline import get_cubert_embedding  # noqa: E402
+except Exception:
+    import json, os, urllib.request  # noqa: E402
+    def get_cubert_embedding(text: str):  # noqa: E402
+        url = os.getenv('EMBEDDER_URL', 'http://127.0.0.1:8001')
+        payload = {
+            'id': 'adhoc-pem-parser', 'username': 'local', 'pemType': 'code', 'timestamp': 0, 'text': text
+        }
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(f"{url}/embed", data=data, headers={'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.load(resp)
+        return body['vector']
+
 
 
 def _iter_jsonl(path: str) -> Iterable[Dict[str, Any]]:
