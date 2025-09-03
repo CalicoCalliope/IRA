@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import time
 from fastapi import FastAPI, Response
-from src.schemas import RankRequest, RankResponse
-from src.ranker import rank as rank_impl
+from .schemas import RankRequest, RankResponse
+from .ranker import rank as rank_impl
 
 app = FastAPI(title="IRA Ranker", version="0.1.0")
 
