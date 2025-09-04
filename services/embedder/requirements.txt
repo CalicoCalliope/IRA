@@ -1,0 +1,17 @@
+# Core runtime
+fastapi
+uvicorn[standard]
+pydantic
+
+# Embedding stack
+torch
+transformers
+sentencepiece
+absl-py
+regex
+python-dotenv
+numpy
+# optional if you touch java tokenizers
+javalang
+# optional if the service will push to a vector db
+# qdrant-client

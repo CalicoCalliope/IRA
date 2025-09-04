@@ -91,3 +91,4 @@ See: [`/docs/schedule.pdf`](./docs/schedule.pdf)
 - /data/          → PEM dataset and learning log stubs
 - /docs/          → Research context, references, and architecture diagrams
 - /tests/         → Evaluation tools and data collection scripts
+“n##
