@@ -1,6 +1,7 @@
 import pytest
 import httpx
 import time
+import uuid
 
 BASE_URL = "http://127.0.0.1:8001"  # your embedder service
 
@@ -19,7 +20,7 @@ def test_health(client):
 
 
 def test_embed_and_filter(client):
-    pem_id = "testuser_001"
+    primary_key = str(uuid.uuid4())
     username = "testuser"
     pem_type = "SyntaxError"
     timestamp = int(time.time())
@@ -27,31 +28,33 @@ def test_embed_and_filter(client):
     # Step 1: Embed some text
     r = client.post("/embed", json={
         "text": "print('hello world')",
-        "id": pem_id,
+        "primary_key": primary_key,
         "username": username,
-        "pemType": pem_type,
+        "pem_type": pem_type,
         "timestamp": timestamp
     })
     assert r.status_code == 200
     data = r.json()
-    assert data["id"] == pem_id
+    assert data["primary_key"] == primary_key
     assert data["dim"] == 768
     assert len(data["vector"]) == 768
+
+    time.sleep(0.5)  # wait for Milvus to be ready
 
     # Step 2: Filter embeddings by username
     r = client.get("/filter", params={"username": username})
     assert r.status_code == 200
     results = r.json()["embeddings"]
-    assert any(e["id"] == pem_id for e in results)
+    assert any(e["primary_key"] == primary_key for e in results)  # <-- match new field name
 
-    # Step 3: Filter embeddings by pemType
-    r = client.get("/filter", params={"pemType": pem_type})
+    # Step 3: Filter embeddings by pem_type
+    r = client.get("/filter", params={"pem_type": pem_type})
     assert r.status_code == 200
     results = r.json()["embeddings"]
-    assert any(e["id"] == pem_id for e in results)
+    assert any(e["primary_key"] == primary_key for e in results)
 
-    # Step 4: Filter embeddings by username + pemType
-    r = client.get("/filter", params={"username": username, "pemType": pem_type})
+    # Step 4: Filter embeddings by username + pem_type
+    r = client.get("/filter", params={"username": username, "pem_type": pem_type})
     assert r.status_code == 200
     results = r.json()["embeddings"]
     assert len(results) > 0

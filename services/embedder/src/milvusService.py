@@ -35,23 +35,17 @@ if COLLECTION_NAME not in client.list_collections():
 # -----------------------------
 # Insert an embedding
 # -----------------------------
-def insert_embedding(vector, pem_id: str, username: str, pem_type: str, timestamp: int):
-    vec = np.array(vector, dtype=np.float32)
-    print("VECTOR DIM:", len(vector))
-    print("VECTOR TYPE:", type(vector), type(vector[0]))
-    print("PK TYPE:", type(pem_id))
-    print("USERNAME TYPE:", type(username))
-    print("PEM_TYPE TYPE:", type(pem_type))
-    print("TIMESTAMP TYPE:", type(timestamp))
-    client.insert(COLLECTION_NAME, [
-        [pem_id],        # PK
-        [list(vector)],        # embedding
-        [timestamp],     # INT64
-        [username],      # VARCHAR
-        [pem_type]       # VARCHAR
-    ])
+def insert_embedding(vector, primary_key: str, username: str, pem_type: str, timestamp: int):
+    row = {
+        "primary_key": str(primary_key),
+        "embedding": vector,
+        "timestamp": int(timestamp),
+        "username": str(username),
+        "pem_type": str(pem_type),
+    }
+    client.insert(collection_name=COLLECTION_NAME, data=row)
     client.flush(COLLECTION_NAME)
-    return pem_id
+    return primary_key
 
 # -----------------------------
 # Query embeddings
@@ -68,12 +62,12 @@ def filter_entries(username: str = None, pem_type: str = None, n_results: int = 
     results = client.query(
         COLLECTION_NAME,
         filter=filter_expr,
-        output_fields=["PK", "embedding", "timestamp", "username", "pem_type"],
+        output_fields=["primary_key", "embedding", "timestamp", "username", "pem_type"],
         limit=n_results
     )
     return [
         {
-            "id": entry.get("PK"),
+            "primary_key": entry.get("primary_key"),
             "embedding": entry.get("embedding"),
             "timestamp": entry.get("timestamp"),
             "username": entry.get("username"),
