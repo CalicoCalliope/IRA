@@ -90,3 +90,6 @@ tests/pem_samples/empty.jsonl
 tests/pem_samples/long.jsonl
 tests/pem_samples/malformed.jsonl
 tests/pem_samples/odd_keys.jsonl
+
+# local backups
+*.bak*
