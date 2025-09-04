@@ -76,7 +76,8 @@ def embed(req: EmbedRequest) -> EmbedResponse:
     vec = pipe.get_cubert_embedding(req.text)
 
     dim = len(vec)
-    EXPECT_DIM = int(os.getenv("MILVUS_EXPECT_DIM", "0") or "0")
+    # Default to 768 to match production Milvus; override with env for dev (0) or other dims.
+    EXPECT_DIM = int(os.getenv("MILVUS_EXPECT_DIM", "768") or "768")
     if EXPECT_DIM and dim != EXPECT_DIM:
         raise ValueError(f"Embedding dimension {dim} != expected {EXPECT_DIM}")
 
