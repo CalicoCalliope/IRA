@@ -5,7 +5,9 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "skipLibCheck": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "outDir": "dist"         // optional, where compiled files go
   },
-  "include": ["src"]
+  "include": ["incoming/src/**/*"],
+  "exclude": ["node_modules"]
 }

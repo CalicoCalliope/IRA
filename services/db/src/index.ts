@@ -103,7 +103,7 @@ app.get("/health", (_req, res) => res.json({ status: "up" }));
 
 // --- Start Server only if not in test environment ---
 if (process.env.NODE_ENV !== "test") {
-  const PORT = process.env.PORT || 4000;
+  const PORT = process.env.DB_PORT || 5001;
 
   (async () => {
     try {

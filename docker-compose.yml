@@ -1,0 +1,53 @@
+version: "3.9"
+services:
+  db:
+    build: ./services/db
+    container_name: db-service
+    ports:
+      - "5001:5001"
+    env_file: ./services/db/.env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  embedder:
+    build: ./services/embedder
+    container_name: embedder
+    ports:
+      - "5002:5002"
+    env_file: ./services/embedder/.env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  ranker:
+    build: ./services/ranker
+    container_name: ranker
+    ports:
+      - "5004:5004"
+    env_file: ./services/ranker/.env
+    depends_on:
+      - db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  coordinator:
+    build: ./services/coordinator/incoming
+    container_name: coordinator
+    ports:
+      - "3000:3000"
+    env_file: ./services/coordinator/.env
+    depends_on:
+      - db
+      - embedder
+      - ranker
+      - llm
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

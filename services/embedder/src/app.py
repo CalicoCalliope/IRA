@@ -118,4 +118,4 @@ if __name__ == "__main__":
     gr = REPO_ROOT / "google-research"
     env = os.environ.copy()
     env["PYTHONPATH"] = f"{env.get('PYTHONPATH','')}:{gr}"
-    uvicorn.run("app:app", host="127.0.0.1", port=8001, reload=False)
+    uvicorn.run("app:app", host="127.0.0.1", port=5002, reload=False)
