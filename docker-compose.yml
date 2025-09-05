@@ -1,46 +1,86 @@
 version: "3.9"
+
 services:
+
+  # -----------------------
+  # MongoDB / DB service
+  # -----------------------
   db:
     build: ./services/db
     container_name: db-service
     ports:
       - "5001:5001"
     env_file: ./services/db/.env
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # -----------------------
+  # Embedder service (serverless Milvus)
+  # -----------------------
   embedder:
     build: ./services/embedder
     container_name: embedder
     ports:
       - "5002:5002"
     env_file: ./services/embedder/.env
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # -----------------------
+  # LLM service
+  # -----------------------
+  llm:
+    build: ./services/llm
+    container_name: llm
+    ports:
+      - "5003:5003"
+    env_file: ./services/llm/.env
+    restart: unless-stopped
+    depends_on:
+      - db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------
+  # Ranker service
+  # -----------------------
   ranker:
     build: ./services/ranker
     container_name: ranker
     ports:
       - "5004:5004"
     env_file: ./services/ranker/.env
+    restart: unless-stopped
     depends_on:
       - db
+      - embedder
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5004/health"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # -----------------------
+  # Coordinator service
+  # -----------------------
   coordinator:
-    build: ./services/coordinator/incoming
+    build: ./services/coordinator
     container_name: coordinator
     ports:
       - "3000:3000"
     env_file: ./services/coordinator/.env
+    restart: unless-stopped
     depends_on:
       - db
       - embedder
@@ -51,3 +91,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+# -----------------------
+# Volumes (optional, for persisting DB data)
+# -----------------------
+volumes:
+  mongo_data:
