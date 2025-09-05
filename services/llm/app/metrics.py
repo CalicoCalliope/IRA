@@ -21,7 +21,7 @@ def record_usage(model: str, prompt_tokens, completion_tokens, total_tokens,
     pt = int(prompt_tokens or 0); ct = int(completion_tokens or 0)
     tt = int(total_tokens or (pt + ct)); lm = int(latency_ms or 0)
     cost = float(estimated_cost_usd or 0.0)
-    now_iso = dt.datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    now_iso = dt.datetime.now(dt.UTC).isoformat(timespec="seconds").replace("+00:00","Z")
     with _lock:
         _totals["total_requests"] += 1
         _totals["prompt_tokens"] += pt; _totals["completion_tokens"] += ct
