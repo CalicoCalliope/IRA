@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Usage: ./wait-for-services.sh host1:port host2:port ... -- command args
 
 set -e

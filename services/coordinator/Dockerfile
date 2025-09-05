@@ -1,18 +1,21 @@
 # Use official Node image
-FROM node:alpine
+FROM node:20-slim
 
-# Set working directory
-WORKDIR /app
+# Install dependencies
+RUN apt-get update && apt-get install -y curl netcat-openbsd && rm -rf /var/lib/apt/lists/*
+
+# Set working directory to incoming (where package.json & src/ live)
+WORKDIR /app/incoming
 
 # Copy package files first for caching
-COPY package*.json ./
+COPY incoming/package*.json ./
 RUN npm install
 
 # Copy the rest of the code
-COPY . .
+COPY incoming/ ./
 
 # Install curl for healthcheck scripts
-RUN apk add --no-cache curl
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
 # Expose Coordinator port
 EXPOSE 3000

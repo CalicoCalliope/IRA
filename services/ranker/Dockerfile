@@ -1,5 +1,7 @@
 # Use official Python slim image
-FROM python:alpine
+FROM python:3.11-slim
+RUN apt-get update && apt-get install -y curl netcat-openbsd
+RUN apt-get update && apt-get install -y curl netcat-openbsd bash
 
 # Set working directory
 WORKDIR /app

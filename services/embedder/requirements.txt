@@ -13,5 +13,5 @@ python-dotenv
 numpy
 # optional if you touch java tokenizers
 javalang
-# optional if the service will push to a vector db
-# qdrant-client
+# vector db
+pymilvus
