@@ -1,6 +1,6 @@
 import express from "express";
-import { RankingService } from "../services/rankingService";
-import { RankRequest } from "../types";
+import { RankingService } from "../services/rankingService.js";
+import { RankRequest } from "../types.js";
 
 const router = express.Router();
 const rankingService = new RankingService();

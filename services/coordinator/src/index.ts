@@ -1,11 +1,11 @@
 import express, { Request, Response } from "express";
 import dotenv from "dotenv";
 import crypto from "crypto";
-import dbService from "./services/dbService";
+import dbService from "./services/dbService.js";
 // import { embedderService } from "./services/embedderService";
-import pemRoutes from "./routes/pemRoutes";
-import rankingRoutes from "./routes/rankingRoutes";
-import { PemLogEntry } from "./types";
+import pemRoutes from "./routes/pemRoutes.js";
+import rankingRoutes from "./routes/rankingRoutes.js";
+import { PemLogEntry } from "./types.js";
 import { z } from "zod";
 
 /* -----------------------------

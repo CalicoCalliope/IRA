@@ -1,5 +1,5 @@
 import axios from "axios";
-import { PemLogEntry } from "../types";
+import { PemLogEntry } from "../types.js";
 
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || "http://localhost:4000";
 

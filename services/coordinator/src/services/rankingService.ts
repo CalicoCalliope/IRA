@@ -1,5 +1,5 @@
 import axios from "axios";
-import { RankRequest, RankResponse } from "../types";
+import { RankRequest, RankResponse } from "../types.js";
 
 export class RankingService {
   private baseUrl: string;

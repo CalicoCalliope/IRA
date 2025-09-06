@@ -1,8 +1,8 @@
 // coordinator/src/routes/pemRoutes.ts
 import { Router } from "express";
-import dbService from "../services/dbService";
+import dbService from "../services/dbService.js";
 // import embedderService from "../services/embedderService";
-import { PemLogEntry } from "../types";
+import { PemLogEntry } from "../types.js";
 
 const router = Router();
 
