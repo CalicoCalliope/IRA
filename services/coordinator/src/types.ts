@@ -18,21 +18,12 @@ export interface PemSubmission {
 }
 
 // -------------------------
-// HRA (hint, reasoning, answer)
-// -------------------------
-export interface HRA {
-  hint?: string;
-  reasoning?: string;
-  answer?: string;
-}
-
-// -------------------------
 // PEM record in MongoDB
 // -------------------------
 export interface PemLogEntry extends PemSubmission {
   id: string;                   // unique ID (used in MongoDB & Milvus)
   isFirstOccurrence: boolean;
-  llm: HRA;
+  llm: LLMResponse;
   accessed: {
     hint?: boolean;
     reasoning?: boolean;
@@ -136,21 +127,21 @@ export interface RankResponse {
 // LLM service request/response
 // -------------------------
 export interface LLMRequest {
-  pem: string;
   pemType: string;
-  pemSkeleton: string;
-  code: string;
-  username: string;
-  timestamp: string;
+  pem: string;
   activeFile: string;
-  workingDirectory: string;
-  directoryTree: string[];
-  pythonVersion?: string;
-  packages?: string[];
+  code: string;
+}
+
+export interface Tier3 {
+  fix_explanation?: string;
+  patched_code?: string | null;
+  diff_unified?: string | null;
+  confidence?: number;
 }
 
 export interface LLMResponse {
   hint?: string;
   reasoning?: string;
-  answer?: string;
+  answer?: Tier3;
 }

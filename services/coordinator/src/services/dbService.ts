@@ -1,6 +1,6 @@
 // src/services/dbService.ts
 import axios from "axios";
-import { PemLogEntry, PemSubmission, HRA } from "../types.js";
+import { PemLogEntry, PemSubmission, LLMResponse } from "../types.js";
 
 // Use environment variable for DB service URL
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || "http://localhost:5001";
@@ -56,7 +56,7 @@ export async function getPEMById(id: string): Promise<PemLogEntry> {
 // Create new PEM
 // -------------------------
 export async function createPEM(
-  pem: PemSubmission & { isFirstOccurrence: boolean; llm: HRA; accessed: any }
+  pem: PemSubmission & { isFirstOccurrence: boolean; llm: LLMResponse; accessed: any }
 ): Promise<PemLogEntry> {
   const payload = { ...pem };
   const response = await axios.post<DBCreateResponse>(`${DB_SERVICE_URL}/pems`, payload);

@@ -1,6 +1,6 @@
 // src/routes/pemRoutes.ts
 import express, { Request, Response } from "express";
-import { PemSubmission, PemLogEntry, EmbedRequest, EmbedResponse, HRA, LLMRequest, LLMResponse, RankRequest, RankResponse, RankerCandidate } from "../types.js";
+import { PemSubmission, PemLogEntry, EmbedRequest, EmbedResponse, LLMRequest, LLMResponse, RankRequest, RankResponse, RankerCandidate } from "../types.js";
 import * as dbService from "../services/dbService.js";
 import * as embedderService from "../services/embedderService.js";
 import * as llmService from "../services/llmService.js";
@@ -62,7 +62,13 @@ router.post("/process-pem", async (req: Request, res: Response) => {
       const embedResponse: EmbedResponse = await embedderService.createEmbedding(embedRequest);
 
       // Call LLM for HRA
-      const llmRequest: LLMRequest = { ...pemSubmission };
+      const llmRequest: LLMRequest = {
+        pemType: pemSubmission.pemType,
+        pem: pemSubmission.pem,
+        code: pemSubmission.code,
+        activeFile: pemSubmission.activeFile,
+      };
+
       const llmResponse: LLMResponse = await llmService.generateHRA(llmRequest);
 
       // Update MongoDB record with HRA
@@ -117,7 +123,7 @@ router.post("/process-pem", async (req: Request, res: Response) => {
       const rankResponse: RankResponse = await rankingService.rankPEM(rankRequest);
 
       // Fetch HRA for best-ranked PEM
-      let hra: HRA = {};
+      let hra: LLMResponse = {};
       if (rankResponse.best?.id) {
         const bestPEM = await dbService.getPEMById(rankResponse.best.id);
         hra = bestPEM.llm;

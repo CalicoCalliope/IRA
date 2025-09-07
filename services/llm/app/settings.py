@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default=os.getenv("OPENAI_API_KEY", ""), description="OpenAI API key")
     openai_model: str = Field(default=os.getenv("OPENAI_MODEL", "gpt-4o-mini"), description="Model name")
     service_host: str = Field(default=os.getenv("SERVICE_HOST", "0.0.0.0"))
-    service_port: int = Field(default=int(os.getenv("SERVICE_PORT", "8084")))
+    service_port: int = Field(default=int(os.getenv("SERVICE_PORT", "5003")))
     request_timeout_seconds: int = Field(default=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "8")))
     allow_origins: str = Field(default=os.getenv("ALLOW_ORIGINS", "*"), description="CORS origins (comma-separated)")
 
