@@ -56,14 +56,11 @@ export async function getPEMById(id: string): Promise<PemLogEntry> {
 // Create new PEM
 // -------------------------
 export async function createPEM(
-  pem: PemSubmission & { isFirstOccurrence: boolean; llm: LLMResponse; accessed: any }
+  pem: PemSubmission & { id:string, isFirstOccurrence: boolean; llm: LLMResponse; accessed: any }
 ): Promise<PemLogEntry> {
   const payload = { ...pem };
-  const response = await axios.post<DBCreateResponse>(`${DB_SERVICE_URL}/pems`, payload);
-  return {
-    ...payload,
-    id: response.data.id,
-  } as PemLogEntry;
+  await axios.post(`${DB_SERVICE_URL}/pems`, payload); // DB just stores what we send
+  return payload as PemLogEntry
 }
 
 // -------------------------

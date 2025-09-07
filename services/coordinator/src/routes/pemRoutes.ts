@@ -6,6 +6,7 @@ import * as embedderService from "../services/embedderService.js";
 import * as llmService from "../services/llmService.js";
 import * as rankingService from "../services/rankingService.js";
 import crypto from "crypto";
+import {v4 as uuidv4} from 'uuid';
 
 const router = express.Router();
 
@@ -40,47 +41,50 @@ router.post("/process-pem", async (req: Request, res: Response) => {
     const isFirstOccurrence = existingPEMs.length === 0;
     let pemRecord: PemLogEntry;
 
+    let myuuid = uuidv4();
+
+    pemRecord = await dbService.createPEM({
+      id: myuuid,
+      ...pemSubmission,
+      isFirstOccurrence: isFirstOccurrence,
+      llm: {},
+      accessed: {},
+    });
+
+    // Embed the code snippet
+    const embedRequest: EmbedRequest = {
+      text: pemSubmission.code,
+      primary_key: pemRecord.id,
+      username: pemSubmission.username,
+      pem_type: pemSubmission.pemType,
+      timestamp: Math.floor(new Date(pemSubmission.timestamp).getTime() / 1000),
+    };
+    const embedResponse: EmbedResponse = await embedderService.createEmbedding(embedRequest);
+
+    // Call LLM for HRA
+    const llmRequest: LLMRequest = {
+      pemType: pemSubmission.pemType,
+      pem: pemSubmission.pem,
+      code: pemSubmission.code,
+      activeFile: pemSubmission.activeFile,
+    };
+
+    const llmResponse: LLMResponse = await llmService.generateHRA(llmRequest);
+
+    // Update MongoDB record with HRA
+    await dbService.updatePEM(pemRecord.id, { llm: llmResponse });
+
     if (isFirstOccurrence) {
       // ---------------------
       // FIRST OCCURRENCE WORKFLOW
-      // ---------------------
-      pemRecord = await dbService.createPEM({
-        ...pemSubmission,
-        isFirstOccurrence: true,
-        llm: {},
-        accessed: {},
-      });
-
-      // Embed the code snippet
-      const embedRequest: EmbedRequest = {
-        text: pemSubmission.code,
-        primary_key: pemRecord.id,
-        username: pemSubmission.username,
-        pem_type: pemSubmission.pemType,
-        timestamp: Math.floor(new Date(pemSubmission.timestamp).getTime() / 1000),
-      };
-      const embedResponse: EmbedResponse = await embedderService.createEmbedding(embedRequest);
-
-      // Call LLM for HRA
-      const llmRequest: LLMRequest = {
-        pemType: pemSubmission.pemType,
-        pem: pemSubmission.pem,
-        code: pemSubmission.code,
-        activeFile: pemSubmission.activeFile,
-      };
-
-      const llmResponse: LLMResponse = await llmService.generateHRA(llmRequest);
-
-      // Update MongoDB record with HRA
-      await dbService.updatePEM(pemRecord.id, { llm: llmResponse });
+      // --------------------
 
       // Return HRA to frontend
-      return res.json({ isFirstOccurrence: true, hra: llmResponse });
+      return res.json({ isFirstOccurrence: isFirstOccurrence, hra: llmResponse });
     } else {
       // ---------------------
       // REPEATED PEM WORKFLOW
       // ---------------------
-      pemRecord = existingPEMs[0]; // Take first existing record (customizable)
 
       // Fetch candidate embeddings from Embedder
       const filterResponse = await embedderService.filterEmbeddings({
@@ -124,13 +128,15 @@ router.post("/process-pem", async (req: Request, res: Response) => {
 
       // Fetch HRA for best-ranked PEM
       let hra: LLMResponse = {};
+      let contextCode = "";
       if (rankResponse.best?.id) {
         const bestPEM = await dbService.getPEMById(rankResponse.best.id);
         hra = bestPEM.llm;
+        contextCode = bestPEM.code;
       }
 
       // Return HRA to frontend
-      return res.json({ isFirstOccurrence: false, hra });
+      return res.json({ isFirstOccurrence: isFirstOccurrence, code: contextCode, hra });
     }
   } catch (err: any) {
     console.error("Error processing PEM:", err);
@@ -168,6 +174,5 @@ router.patch("/accessed/:pemId", async (req: Request, res: Response) => {
     return res.status(500).json({ error: err.message });
   }
 });
-
 
 export default router;

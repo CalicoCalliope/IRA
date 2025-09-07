@@ -38,12 +38,19 @@ app.use(express.json());
 
 // --- PEM Routes ---
 
-// Create PEM
+// Create PEM with enforced UUID
 app.post("/pems", async (req, res) => {
   const entry: PemLogEntry = req.body;
+
+  // Enforce presence of id
+  if (!entry.id) {
+    return res.status(400).json({ error: "Missing 'id'. Coordinator must provide UUID." });
+  }
+
   try {
-    const result = await pemCollection.insertOne(entry);
-    res.json({ status: "ok", id: entry.id || result.insertedId });
+    // Insert as-is; Mongo will respect the provided 'id'
+    await pemCollection.insertOne(entry);
+    res.json({ status: "ok", id: entry.id });
   } catch (err: any) {
     console.error(err);
     res.status(500).json({ error: err.message });
