@@ -1,29 +1,26 @@
+// src/services/rankingService.ts
 import axios from "axios";
 import { RankRequest, RankResponse } from "../types.js";
 
-export class RankingService {
-  private baseUrl: string;
+const RANKER_SERVICE_URL = process.env.RANKER_SERVICE_URL || "http://localhost:5003";
 
-  constructor(baseUrl?: string) {
-    // Either inject via constructor or use env var
-    this.baseUrl = baseUrl || process.env.RANKING_URL || "http://localhost:8000";
+/**
+ * Call the Ranker service to re-rank candidate PEMs
+ * @param req RankRequest prepared by the coordinator
+ * @returns RankResponse containing best and alternate items
+ */
+export async function rankPEM(req: RankRequest): Promise<RankResponse> {
+  try {
+    const response = await axios.post(`${RANKER_SERVICE_URL}/rank`, req);
+    return response.data as RankResponse;
+  } catch (err: any) {
+    console.error("Ranker service error:", err.message);
+    throw new Error("Failed to rank PEM candidates");
   }
+}
 
-  async health(): Promise<boolean> {
-    try {
-      const res = await axios.get<{ ok: boolean }>(`${this.baseUrl}/health`);
-      return res.data.ok === true;
-    } catch (err) {
-      return false;
-    }
-  }
-
-  async rank(req: RankRequest): Promise<RankResponse> {
-    try {
-      const res = await axios.post<RankResponse>(`${this.baseUrl}/rank`, req);
-      return res.data;
-    } catch (err: any) {
-      throw new Error(`Ranking service error: ${err.message}`);
-    }
-  }
+// Optional: health check
+export async function health(): Promise<any> {
+  const response = await axios.get(`${RANKER_SERVICE_URL}/health`);
+  return response.data;
 }

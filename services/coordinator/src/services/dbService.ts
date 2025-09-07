@@ -1,57 +1,74 @@
+// src/services/dbService.ts
 import axios from "axios";
-import { PemLogEntry } from "../types.js";
+import { PemLogEntry, PemSubmission, HRA } from "../types.js";
 
-const DB_SERVICE_URL = process.env.DB_SERVICE_URL || "http://localhost:4000";
+// Use environment variable for DB service URL
+const DB_SERVICE_URL = process.env.DB_SERVICE_URL || "http://localhost:5001";
 
-interface SavePemResponse {
-  status: string;
-  id: string;
-}
-
-interface GetPemResponse {
-  status: string;
-  data: PemLogEntry;
-}
-
-interface GetPemsResponse {
+// -------------------------
+// Response interfaces
+// -------------------------
+interface DBListResponse {
   status: string;
   data: PemLogEntry[];
 }
 
-interface GenericStatusResponse {
+interface DBGetResponse {
+  status: string;
+  data: PemLogEntry;
+}
+
+interface DBCreateResponse {
+  status: string;
+  id: string;
+}
+
+interface DBPatchResponse {
   status: string;
 }
 
-const dbService = {
-  async savePemLog(entry: PemLogEntry): Promise<SavePemResponse> {
-    const res = await axios.post<SavePemResponse>(`${DB_SERVICE_URL}/pems`, entry);
-    return res.data;
-  },
+// -------------------------
+// Fetch PEMs by filters
+// -------------------------
+export async function getPEMs(filters: {
+  username?: string;
+  pemType?: string;
+  pemSkeleton?: string;
+}): Promise<PemLogEntry[]> {
+  const params: Record<string, string> = {};
+  if (filters.username) params.username = filters.username;
+  if (filters.pemType) params.pemType = filters.pemType;
+  if (filters.pemSkeleton) params.pemSkeleton = filters.pemSkeleton;
 
-  async getPemLog(id: string): Promise<PemLogEntry> {
-    const res = await axios.get<GetPemResponse>(`${DB_SERVICE_URL}/pems/${id}`);
-    return res.data.data;
-  },
+  const response = await axios.get<DBListResponse>(`${DB_SERVICE_URL}/pems`, { params });
+  return response.data.data || [];
+}
 
-  async getPemsByFilter(filters: { username?: string; pemType?: string } = {}): Promise<PemLogEntry[]> {
-    const res = await axios.get<GetPemsResponse>(`${DB_SERVICE_URL}/pems`, { params: filters });
-    return res.data.data;
-  },
+// -------------------------
+// Fetch PEM by ID
+// -------------------------
+export async function getPEMById(id: string): Promise<PemLogEntry> {
+  const response = await axios.get<DBGetResponse>(`${DB_SERVICE_URL}/pems/${id}`);
+  return response.data.data;
+}
 
-  async updatePemLog(id: string, updates: Partial<PemLogEntry>): Promise<GenericStatusResponse> {
-    const res = await axios.patch<GenericStatusResponse>(`${DB_SERVICE_URL}/pems/${id}`, updates);
-    return res.data;
-  },
+// -------------------------
+// Create new PEM
+// -------------------------
+export async function createPEM(
+  pem: PemSubmission & { isFirstOccurrence: boolean; llm: HRA; accessed: any }
+): Promise<PemLogEntry> {
+  const payload = { ...pem };
+  const response = await axios.post<DBCreateResponse>(`${DB_SERVICE_URL}/pems`, payload);
+  return {
+    ...payload,
+    id: response.data.id,
+  } as PemLogEntry;
+}
 
-  async deletePemLog(id: string): Promise<GenericStatusResponse> {
-    const res = await axios.delete<GenericStatusResponse>(`${DB_SERVICE_URL}/pems/${id}`);
-    return res.data;
-  },
-
-  async pingDb(): Promise<GenericStatusResponse> {
-    const res = await axios.get<GenericStatusResponse>(`${DB_SERVICE_URL}/health`);
-    return res.data;
-  },
-};
-
-export default dbService;
+// -------------------------
+// Update PEM fields
+// -------------------------
+export async function updatePEM(id: string, updates: Partial<PemLogEntry>): Promise<void> {
+  await axios.patch<DBPatchResponse>(`${DB_SERVICE_URL}/pems/${id}`, updates);
+}

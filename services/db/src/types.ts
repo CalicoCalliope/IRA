@@ -17,4 +17,9 @@ export interface PemLogEntry {
     reasoning?: string;
     answer?: string;
   };
+  accessed:{
+    hint?: boolean;
+    reasoning?: boolean;
+    answer?: boolean;
+  };
 }

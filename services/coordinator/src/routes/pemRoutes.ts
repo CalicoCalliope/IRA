@@ -1,70 +1,167 @@
-// coordinator/src/routes/pemRoutes.ts
-import { Router } from "express";
-import dbService from "../services/dbService.js";
-// import embedderService from "../services/embedderService";
-import { PemLogEntry } from "../types.js";
+// src/routes/pemRoutes.ts
+import express, { Request, Response } from "express";
+import { PemSubmission, PemLogEntry, EmbedRequest, EmbedResponse, HRA, LLMRequest, LLMResponse, RankRequest, RankResponse, RankerCandidate } from "../types.js";
+import * as dbService from "../services/dbService.js";
+import * as embedderService from "../services/embedderService.js";
+import * as llmService from "../services/llmService.js";
+import * as rankingService from "../services/rankingService.js";
+import crypto from "crypto";
 
-const router = Router();
+const router = express.Router();
 
 /**
- * Handle new PEM from the extension
- * - Generate UID
- * - Save to DB
- * - Send to embedder
+ * Simple SHA256 hash utility for strings
  */
-router.post("/handlePEM", async (req, res) => {
-  try {
-    const { pem, metadata } = req.body;
+function hashString(input: string): string {
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
 
-    if (!pem || !metadata) {
-      return res.status(400).json({ error: "pem and metadata are required" });
+/**
+ * POST /process-pem
+ * Orchestrates the full PEM workflow:
+ * 1. Check first occurrence in DB
+ * 2. Save PEM record if first occurrence
+ * 3. Embed code snippet
+ * 4. Call LLM for HRA (if first occurrence)
+ * 5. If repeated, call Embedder -> Ranker -> fetch previous HRA
+ * 6. Return HRA to frontend
+ */
+router.post("/process-pem", async (req: Request, res: Response) => {
+  try {
+    const pemSubmission: PemSubmission = req.body;
+
+    // Step 1: Check if PEM is first occurrence
+    const existingPEMs = await dbService.getPEMs({
+      username: pemSubmission.username,
+      pemType: pemSubmission.pemType,
+      pemSkeleton: pemSubmission.pemSkeleton,
+    });
+
+    const isFirstOccurrence = existingPEMs.length === 0;
+    let pemRecord: PemLogEntry;
+
+    if (isFirstOccurrence) {
+      // ---------------------
+      // FIRST OCCURRENCE WORKFLOW
+      // ---------------------
+      pemRecord = await dbService.createPEM({
+        ...pemSubmission,
+        isFirstOccurrence: true,
+        llm: {},
+        accessed: {},
+      });
+
+      // Embed the code snippet
+      const embedRequest: EmbedRequest = {
+        text: pemSubmission.code,
+        primary_key: pemRecord.id,
+        username: pemSubmission.username,
+        pem_type: pemSubmission.pemType,
+        timestamp: Math.floor(new Date(pemSubmission.timestamp).getTime() / 1000),
+      };
+      const embedResponse: EmbedResponse = await embedderService.createEmbedding(embedRequest);
+
+      // Call LLM for HRA
+      const llmRequest: LLMRequest = { ...pemSubmission };
+      const llmResponse: LLMResponse = await llmService.generateHRA(llmRequest);
+
+      // Update MongoDB record with HRA
+      await dbService.updatePEM(pemRecord.id, { llm: llmResponse });
+
+      // Return HRA to frontend
+      return res.json({ isFirstOccurrence: true, hra: llmResponse });
+    } else {
+      // ---------------------
+      // REPEATED PEM WORKFLOW
+      // ---------------------
+      pemRecord = existingPEMs[0]; // Take first existing record (customizable)
+
+      // Fetch candidate embeddings from Embedder
+      const filterResponse = await embedderService.filterEmbeddings({
+        username: pemSubmission.username,
+        pem_type: pemSubmission.pemType,
+        n_results: 100,
+      });
+
+      // Prepare Ranker candidates
+      const candidates: RankerCandidate[] = filterResponse.embeddings.map((e) => ({
+        id: e.primary_key,
+        vector_similarity: 0, // Ranker computes actual similarity
+        pemSkeleton: pemSubmission.pemSkeleton,
+        timestamp: new Date(e.timestamp * 1000).toISOString(),
+        activeFile_hash: hashString(pemSubmission.activeFile),
+        workingDirectory_hash: hashString(pemSubmission.workingDirectory),
+        directoryTree: pemSubmission.directoryTree,
+        packages: pemSubmission.packages || [],
+        pythonVersion: pemSubmission.pythonVersion,
+      }));
+
+      // Prepare RankRequest
+      const rankRequest: RankRequest = {
+        params: {}, // Optional: customize RankParams
+        query: {
+          student_id: pemSubmission.username,
+          pemType: pemSubmission.pemType,
+          pemSkeleton: pemSubmission.pemSkeleton,
+          timestamp: pemSubmission.timestamp,
+          activeFile_hash: hashString(pemSubmission.activeFile),
+          workingDirectory_hash: hashString(pemSubmission.workingDirectory),
+          directoryTree: pemSubmission.directoryTree,
+          packages: pemSubmission.packages || [],
+          pythonVersion: pemSubmission.pythonVersion,
+        },
+        candidates,
+      };
+
+      // Call Ranker
+      const rankResponse: RankResponse = await rankingService.rankPEM(rankRequest);
+
+      // Fetch HRA for best-ranked PEM
+      let hra: HRA = {};
+      if (rankResponse.best?.id) {
+        const bestPEM = await dbService.getPEMById(rankResponse.best.id);
+        hra = bestPEM.llm;
+      }
+
+      // Return HRA to frontend
+      return res.json({ isFirstOccurrence: false, hra });
+    }
+  } catch (err: any) {
+    console.error("Error processing PEM:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * PATCH /accessed/:pemId
+ * Mark which parts of HRA the user has seen
+ * Body: { hint?: boolean, reasoning?: boolean, answer?: boolean }
+ */
+router.patch("/accessed/:pemId", async (req: Request, res: Response) => {
+  try {
+    const pemId = req.params.pemId;
+    const accessedUpdate = req.body as { hint?: boolean; reasoning?: boolean; answer?: boolean };
+
+    if (!accessedUpdate || Object.keys(accessedUpdate).length === 0) {
+      return res.status(400).json({ error: "No accessed fields provided" });
     }
 
-    // Generate a UID for this PEM
-    const pemId = crypto.randomUUID();
+    // Fetch existing PEM
+    const pem = await dbService.getPEMById(pemId);
+    if (!pem) return res.status(404).json({ error: "PEM not found" });
 
-    // Save PEM + metadata to Mongo via dbService
-    const pemEntry: PemLogEntry = { id: pemId, ...metadata, pem };
-    await dbService.savePemLog(pemEntry);
+    // Merge existing accessed fields with updates
+    const updatedAccessed = { ...pem.accessed, ...accessedUpdate };
 
-    // Send PEM + UID to embedder service (placeholder for now)
-    // await embedderService.embedAndStore({ id: pemId, pem, metadata });
+    // Update in DB
+    await dbService.updatePEM(pemId, { accessed: updatedAccessed });
 
-    res.json({ status: "ok", id: pemId });
+    return res.json({ status: "ok", accessed: updatedAccessed });
   } catch (err: any) {
-    console.error("[Coordinator /handlePEM] Error:", err);
-    res.status(500).json({ error: err.message });
+    console.error("Error updating accessed HRA:", err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
-/**
- * Optional: Get PEM by ID
- */
-router.get("/:id", async (req, res) => {
-  try {
-    const pem = await dbService.getPemLog(req.params.id);
-    res.json({ status: "ok", data: pem });
-  } catch (err: any) {
-    console.error("[Coordinator GET /pems/:id] Error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/**
- * Optional: List PEMs with filters
- */
-router.get("/", async (req, res) => {
-  try {
-    const filters = {
-      username: req.query.username as string | undefined,
-      pemType: req.query.pemType as string | undefined,
-    };
-    const pems = await dbService.getPemsByFilter(filters);
-    res.json({ status: "ok", data: pems });
-  } catch (err: any) {
-    console.error("[Coordinator GET /pems] Error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 export default router;

@@ -1,104 +1,156 @@
-export interface PemLogEntry {
-  id: string;
-  timestamp: string;
-  pem: string;
+// src/types.ts
+
+// -------------------------
+// PEM submission from frontend
+// -------------------------
+export interface PemSubmission {
+  pem: string;                  // full error message
   pemType: string;
   pemSkeleton: string;
-  code: string;
+  code: string;                 // code snippet
   username: string;
+  timestamp: string;            // ISO string
   activeFile: string;
   workingDirectory: string;
   directoryTree: string[];
   pythonVersion?: string;
-  packages?: any[];
+  packages?: string[];
+}
+
+// -------------------------
+// HRA (hint, reasoning, answer)
+// -------------------------
+export interface HRA {
+  hint?: string;
+  reasoning?: string;
+  answer?: string;
+}
+
+// -------------------------
+// PEM record in MongoDB
+// -------------------------
+export interface PemLogEntry extends PemSubmission {
+  id: string;                   // unique ID (used in MongoDB & Milvus)
   isFirstOccurrence: boolean;
-  llm: {
-    hint?: string;
-    reasoning?: string;
-    answer?: string;
+  llm: HRA;
+  accessed: {
+    hint?: boolean;
+    reasoning?: boolean;
+    answer?: boolean;
   };
 }
 
-export interface EmbeddingPoint {
-  id: string;
+// -------------------------
+// Embedder request/response types
+// -------------------------
+export interface EmbedRequest {
+  text: string;
+  primary_key: string;           // PEM ID
+  username: string;
+  pem_type: string;
+  timestamp: number;             // seconds since epoch
+}
+
+export interface EmbedResponse {
   vector: number[];
-  payload: {
-    timestamp: string;
-    username: string;
-    pemType: string;
-  };
+  dim: number;
+  primary_key: string;
+  timestamp: number;
 }
 
-// Ranking Params
+export interface FilterResponseItem {
+  primary_key: string;
+  embedding: number[];
+  timestamp: number;
+  username: string;
+  pem_type: string;
+}
+
+export interface FilterResponse {
+  embeddings: FilterResponseItem[];
+}
+
+// -------------------------
+// Ranker types
+// -------------------------
+export interface RankerCandidate {
+  id: string;                    // PEM record ID
+  vector_similarity: number;      // cosine similarity with current PEM
+  pemSkeleton: string;
+  timestamp: string;              // ISO string
+  activeFile_hash: string;
+  workingDirectory_hash: string;
+  directoryTree: string[];
+  packages: string[];
+  pythonVersion?: string;
+  resolutionDepth?: number;
+}
+
 export interface RankParams {
-  k: number;                          // 1–10
-  mmr_lambda: number;                  // 0–1
-  confidence_floor: number;            // 0–1
-  recency_half_life_days: number;      // >0
-  skeleton_filter_threshold: number;   // 0–1
-  allow_repeat_depth: number;          // 0–3
-  allow_repeat_min_hours: number;      // >=0
-  success_bonus_alpha: number;         // 0–0.2
+  k?: number;
+  mmr_lambda?: number;
+  confidence_floor?: number;
+  recency_half_life_days?: number;
+  skeleton_filter_threshold?: number;
+  allow_repeat_depth?: number;
+  allow_repeat_min_hours?: number;
+  success_bonus_alpha?: number;
 }
 
-// Context about the current PEM
 export interface QueryContext {
   student_id: string;
   pemType: string;
   pemSkeleton: string;
-  timestamp: string
+  timestamp: string;
   activeFile_hash: string;
   workingDirectory_hash: string;
   directoryTree: string[];
   packages: string[];
-  pythonVersion: string;
-  resolutionDepth?: number;            // 0–3
+  pythonVersion?: string;
+  resolutionDepth?: number;
   current_pem_point_id?: string;
   code_slice?: string;
 }
 
-// Candidate prepared by Coordinator
-export interface Candidate {
-  id: string;
-  vector_similarity: number;           // 0–1
-  pemSkeleton: string;
-  timestamp: string;                   // ISO datetime
-  activeFile_hash: string;
-  workingDirectory_hash: string;
-  directoryTree: string[];
-  packages: string[];
-  pythonVersion: string;
-  resolutionDepth?: number;            // 0–3
-  activeFile_ext?: string;             // e.g. ".py"
-}
-
-// Request payload to /rank
 export interface RankRequest {
   params: RankParams;
   query: QueryContext;
-  candidates: Candidate[];
+  candidates: RankerCandidate[];
 }
 
-// Ranked item result
 export interface RankedItem {
   id: string;
-  score: number;                       // 0–1
-  features: {
-    skeleton: number;
-    vector: number;
-    recency: number;
-    project: number;
-    file: number;
-    packages: number;
-    pyver: number;
-  };
+  score: number;
+  features: Record<string, number>;
   reasons: string[];
 }
 
-// Ranker response
 export interface RankResponse {
   abstain: boolean;
   reason?: string;
   best?: RankedItem;
   alternates: RankedItem[];
+}
+
+// -------------------------
+// LLM service request/response
+// -------------------------
+export interface LLMRequest {
+  pem: string;
+  pemType: string;
+  pemSkeleton: string;
+  code: string;
+  username: string;
+  timestamp: string;
+  activeFile: string;
+  workingDirectory: string;
+  directoryTree: string[];
+  pythonVersion?: string;
+  packages?: string[];
+}
+
+export interface LLMResponse {
+  hint?: string;
+  reasoning?: string;
+  answer?: string;
 }
