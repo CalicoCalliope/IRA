@@ -69,6 +69,7 @@ router.post("/process-pem", async (req: Request, res: Response) => {
       activeFile: pemSubmission.activeFile,
     };
 
+    let contextCode = pemSubmission.code
     const llmResponse: LLMResponse = await llmService.generateHRA(llmRequest);
 
     // Update MongoDB record with HRA
@@ -80,7 +81,7 @@ router.post("/process-pem", async (req: Request, res: Response) => {
       // --------------------
 
       // Return HRA to frontend
-      return res.json({ isFirstOccurrence: isFirstOccurrence, hra: llmResponse });
+      return res.json({ isFirstOccurrence: isFirstOccurrence, code: contextCode, hra: llmResponse });
     } else {
       // ---------------------
       // REPEATED PEM WORKFLOW
@@ -128,7 +129,6 @@ router.post("/process-pem", async (req: Request, res: Response) => {
 
       // Fetch HRA for best-ranked PEM
       let hra: LLMResponse = {};
-      let contextCode = "";
       if (rankResponse.best?.id) {
         const bestPEM = await dbService.getPEMById(rankResponse.best.id);
         hra = bestPEM.llm;
