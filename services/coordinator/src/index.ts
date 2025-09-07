@@ -2,14 +2,19 @@
 import express from "express";
 import dotenv from "dotenv";
 import path from "path";
+import { fileURLToPath } from "url";
 import pemRoutes from "./routes/pemRoutes.js";
+
+// Compute __dirname in ES module context
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Load environment variables from .env
 const envPath = path.resolve(__dirname, "../.env");
 dotenv.config({ path: envPath });
 
 const app = express();
-const PORT = process.env.COORDINATOR_PORT || 5000;
+const PORT = parseInt(process.env.COORDINATOR_PORT || "3000", 10);
 
 // Middleware
 app.use(express.json());
@@ -23,6 +28,6 @@ app.get("/health", (_req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`[Coordinator] Running on http://localhost:${PORT}`);
-});
+app.listen(PORT, "0.0.0.0", () =>
+  console.log(`[Coordinator] Running on http://0.0.0.0:${PORT}`)
+);
