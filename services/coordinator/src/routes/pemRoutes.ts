@@ -18,6 +18,54 @@ function hashString(input: string): string {
 }
 
 /**
+ * Extracts the active task snippet from the full code.
+ * Assumes one active task is active at a time.
+ * Returns only uncommented lines from the first block that contains them.
+ */
+export function extractTaskSnippet(fullCode: string): string {
+  return fullCode
+    .split("\n")
+    .map(line => {
+      // Ignore shebangs (#!) but strip normal comments
+      if (line.trim().startsWith("#!")) {
+        return line; 
+      }
+
+      let inString = false;
+      let stringChar = "";
+      let result = "";
+
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        const prevChar = i > 0 ? line[i - 1] : "";
+
+        // Detect string start
+        if (!inString && (char === '"' || char === "'")) {
+          inString = true;
+          stringChar = char;
+          result += char;
+        }
+        // Detect string end (ignore escaped quotes)
+        else if (inString && char === stringChar && prevChar !== "\\") {
+          inString = false;
+          result += char;
+        }
+        // If we see # outside a string, cut the rest of the line
+        else if (!inString && char === "#") {
+          break;
+        }
+        else {
+          result += char;
+        }
+      }
+
+      return result.trimEnd(); // strip trailing spaces
+    })
+    .join("\n")
+    .trim();
+}
+
+/**
  * POST /process-pem
  * Orchestrates the full PEM workflow:
  * 1. Check first occurrence in DB
@@ -30,6 +78,9 @@ function hashString(input: string): string {
 router.post("/process-pem", async (req: Request, res: Response) => {
   try {
     const pemSubmission: PemSubmission = req.body;
+
+    let contextCode = extractTaskSnippet(pemSubmission.code);
+    console.log("Extracted context code:\n", contextCode);
 
     // Step 1: Check if PEM is first occurrence
     const existingPEMs = await dbService.getPEMs({
@@ -53,7 +104,7 @@ router.post("/process-pem", async (req: Request, res: Response) => {
 
     // Embed the code snippet
     const embedRequest: EmbedRequest = {
-      text: pemSubmission.code,
+      text: contextCode,
       primary_key: pemRecord.id,
       username: pemSubmission.username,
       pem_type: pemSubmission.pemType,
@@ -65,15 +116,14 @@ router.post("/process-pem", async (req: Request, res: Response) => {
     const llmRequest: LLMRequest = {
       pemType: pemSubmission.pemType,
       pem: pemSubmission.pem,
-      code: pemSubmission.code,
+      code: contextCode,
       activeFile: pemSubmission.activeFile,
     };
 
-    let contextCode = pemSubmission.code
     const llmResponse: LLMResponse = await llmService.generateHRA(llmRequest);
 
     // Update MongoDB record with HRA
-    await dbService.updatePEM(pemRecord.id, { llm: llmResponse });
+    await dbService.updatePEM(pemRecord.id, { llm: llmResponse, code: contextCode });
 
     return res.json({ isFirstOccurrence: isFirstOccurrence, code: contextCode, hra: llmResponse });
 
