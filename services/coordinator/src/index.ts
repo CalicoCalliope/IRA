@@ -14,7 +14,7 @@ const envPath = path.resolve(__dirname, "../.env");
 dotenv.config({ path: envPath });
 
 const app = express();
-const PORT = parseInt(process.env.COORDINATOR_PORT || "3000", 10);
+const PORT = parseInt(process.env.COORDINATOR_PORT || "8080", 10);
 
 // Middleware
 app.use(express.json());
