@@ -23,7 +23,7 @@ COPY . .
 RUN tsc
 
 # Expose Coordinator port
-EXPOSE 8080
+EXPOSE 80
 
 # Make wait-for-services script executable
 RUN chmod +x /app/wait-for-services.sh

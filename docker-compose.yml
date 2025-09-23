@@ -78,7 +78,7 @@ services:
     build: ./services/coordinator
     container_name: coordinator
     ports:
-      - "80:8080"
+      - "80:80"
     env_file: ./services/coordinator/.env
     restart: unless-stopped
     depends_on:
@@ -87,7 +87,7 @@ services:
       - ranker
       - llm
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
       interval: 10s
       timeout: 5s
       retries: 5
