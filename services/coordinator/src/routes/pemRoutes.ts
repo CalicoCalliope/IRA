@@ -7,7 +7,6 @@ import * as llmService from "../services/llmService.js";
 import * as rankingService from "../services/rankingService.js";
 import crypto from "crypto";
 import {v4 as uuidv4} from 'uuid';
-
 const router = express.Router();
 
 /**
@@ -65,6 +64,19 @@ export function extractTaskSnippet(fullCode: string): string {
     .trim();
 }
 
+/** Normalize package list to lowercase names without versions
+ */
+function normalizePackages(pkgs?: any[]): string[] {
+  if (!Array.isArray(pkgs)) return [];
+  return pkgs
+    .map(p => {
+      if (typeof p === "string") return p.split("==")[0].toLowerCase();
+      if (typeof p === "object" && p?.name) return String(p.name).toLowerCase();
+      return "";
+    })
+    .filter(Boolean);
+}
+
 /**
  * POST /process-pem
  * Orchestrates the full PEM workflow:
@@ -82,7 +94,9 @@ router.post("/process-pem", async (req: Request, res: Response) => {
     let contextCode = extractTaskSnippet(pemSubmission.code);
     console.log("Extracted context code:\n", contextCode);
 
-    // Step 1: Check if PEM is first occurrence
+    let EXPERIMENT_MODE: string = "evaluation"; // "evaluation" OR "population"
+
+    // Check if PEM is first occurrence
     const existingPEMs = await dbService.getPEMs({
       username: pemSubmission.username,
       pemType: pemSubmission.pemType,
@@ -91,7 +105,6 @@ router.post("/process-pem", async (req: Request, res: Response) => {
 
     const isFirstOccurrence = existingPEMs.length === 0;
     let pemRecord: PemLogEntry;
-
     let myuuid = uuidv4();
 
     pemRecord = await dbService.createPEM({
@@ -124,72 +137,84 @@ router.post("/process-pem", async (req: Request, res: Response) => {
 
     // Update MongoDB record with HRA
     await dbService.updatePEM(pemRecord.id, { llm: llmResponse, code: contextCode });
+    
+    // Decide what to return based on experiment mode
+    if (EXPERIMENT_MODE === "population") {
+      // Show LLM output directly
+      return res.json({ isFirstOccurrence, code: contextCode, hra: llmResponse });
+    }
+
+    if (EXPERIMENT_MODE === "evaluation" && !isFirstOccurrence) {
+      // Fetch candidate embeddings from Embedder
+      const filterResponse = await embedderService.filterEmbeddings({
+        username: pemSubmission.username,
+        pem_type: pemSubmission.pemType,
+        n_results: 100,
+      });
+
+      // Exclude the current PEM from the candidates (avoid self-match)
+      const candidates = filterResponse.embeddings
+        .filter(e => e.primary_key !== pemRecord.id)
+        .map(e => ({
+          id: e.primary_key,
+          vector_similarity: 0, // Ranker computes actual similarity internally
+          pemSkeleton: pemSubmission.pemSkeleton,
+          timestamp: new Date(e.timestamp * 1000).toISOString(),
+          activeFile_hash: hashString(pemSubmission.activeFile),
+          workingDirectory_hash: hashString(pemSubmission.workingDirectory),
+          directoryTree: pemSubmission.directoryTree || [],
+          packages: normalizePackages(pemSubmission.packages),
+          pythonVersion: pemSubmission.pythonVersion,
+        }));
+
+      // Prepare RankRequest
+      const rankRequest: RankRequest = {
+        params: {
+          k: 3,
+          mmr_lambda: 0.7,
+          confidence_floor: 0.5,
+          recency_half_life_days: 14.0,
+          skeleton_filter_threshold: 0.6,
+          allow_repeat_depth: 3,
+          allow_repeat_min_hours: 24.0,
+          success_bonus_alpha: 0.03,
+        },
+        query: {
+          student_id: pemSubmission.username,
+          pemType: pemSubmission.pemType,
+          pemSkeleton: pemSubmission.pemSkeleton,
+          timestamp: new Date(pemSubmission.timestamp).toISOString(),
+          activeFile_hash: hashString(pemSubmission.activeFile),
+          workingDirectory_hash: hashString(pemSubmission.workingDirectory),
+          directoryTree: pemSubmission.directoryTree || [],
+          packages: normalizePackages(pemSubmission.packages),
+          pythonVersion: pemSubmission.pythonVersion,
+        },
+        candidates, // use filtered list
+      };
+
+      // Debug: see what ranker got
+      console.log("[Coordinator] Sending candidates to ranker:", candidates.map(c => c.id));
+
+      // Call Ranker
+      const rankResponse: RankResponse = await rankingService.rankPEM(rankRequest);
+
+      // Debug: see what coordinator received
+      console.log("[Coordinator] Ranker response:", JSON.stringify(rankResponse, null, 2));
+
+      // Fetch HRA for best-ranked PEM
+      let hra: LLMResponse = {};
+      if (rankResponse.best?.id) {
+        const bestPEM = await dbService.getPEMById(rankResponse.best.id);
+        hra = bestPEM.llm;
+        contextCode = bestPEM.code;
+      }
+
+      // Return HRA to frontend
+      return res.json({ isFirstOccurrence: isFirstOccurrence, code: contextCode, hra });
+    }
 
     return res.json({ isFirstOccurrence: isFirstOccurrence, code: contextCode, hra: llmResponse });
-
-    // if (isFirstOccurrence) {
-    //   // ---------------------
-    //   // FIRST OCCURRENCE WORKFLOW
-    //   // --------------------
-
-    //   // Return HRA to frontend
-    //   return res.json({ isFirstOccurrence: isFirstOccurrence, code: contextCode, hra: llmResponse });
-    // } else {
-    //   // ---------------------
-    //   // REPEATED PEM WORKFLOW
-    //   // ---------------------
-
-    //   // Fetch candidate embeddings from Embedder
-    //   const filterResponse = await embedderService.filterEmbeddings({
-    //     username: pemSubmission.username,
-    //     pem_type: pemSubmission.pemType,
-    //     n_results: 100,
-    //   });
-
-    //   // Prepare Ranker candidates
-    //   const candidates: RankerCandidate[] = filterResponse.embeddings.map((e) => ({
-    //     id: e.primary_key,
-    //     vector_similarity: 0, // Ranker computes actual similarity
-    //     pemSkeleton: pemSubmission.pemSkeleton,
-    //     timestamp: new Date(e.timestamp * 1000).toISOString(),
-    //     activeFile_hash: hashString(pemSubmission.activeFile),
-    //     workingDirectory_hash: hashString(pemSubmission.workingDirectory),
-    //     directoryTree: pemSubmission.directoryTree,
-    //     packages: pemSubmission.packages || [],
-    //     pythonVersion: pemSubmission.pythonVersion,
-    //   }));
-
-    //   // Prepare RankRequest
-    //   const rankRequest: RankRequest = {
-    //     params: {}, // Optional: customize RankParams
-    //     query: {
-    //       student_id: pemSubmission.username,
-    //       pemType: pemSubmission.pemType,
-    //       pemSkeleton: pemSubmission.pemSkeleton,
-    //       timestamp: pemSubmission.timestamp,
-    //       activeFile_hash: hashString(pemSubmission.activeFile),
-    //       workingDirectory_hash: hashString(pemSubmission.workingDirectory),
-    //       directoryTree: pemSubmission.directoryTree,
-    //       packages: pemSubmission.packages || [],
-    //       pythonVersion: pemSubmission.pythonVersion,
-    //     },
-    //     candidates,
-    //   };
-
-    //   // Call Ranker
-    //   const rankResponse: RankResponse = await rankingService.rankPEM(rankRequest);
-
-    //   // Fetch HRA for best-ranked PEM
-    //   let hra: LLMResponse = {};
-    //   if (rankResponse.best?.id) {
-    //     const bestPEM = await dbService.getPEMById(rankResponse.best.id);
-    //     hra = bestPEM.llm;
-    //     contextCode = bestPEM.code;
-    //   }
-
-    //   // Return HRA to frontend
-    //   return res.json({ isFirstOccurrence: isFirstOccurrence, code: contextCode, hra });
-    // }
   } catch (err: any) {
     console.error("Error processing PEM:", err);
     return res.status(500).json({ error: err.message });

@@ -2,7 +2,7 @@
 import axios from "axios";
 import { RankRequest, RankResponse } from "../types.js";
 
-const RANKER_SERVICE_URL = process.env.RANKER_SERVICE_URL || "http://localhost:5003";
+const RANKER_SERVICE_URL = process.env.RANKER_SERVICE_URL || "http://localhost:5004";
 
 /**
  * Call the Ranker service to re-rank candidate PEMs
@@ -14,7 +14,11 @@ export async function rankPEM(req: RankRequest): Promise<RankResponse> {
     const response = await axios.post(`${RANKER_SERVICE_URL}/rank`, req);
     return response.data as RankResponse;
   } catch (err: any) {
-    console.error("Ranker service error:", err.message);
+    if (err.response) {
+      console.error("Ranker service error:", err.response.status, err.response.data);
+    } else {
+      console.error("Ranker service error:", err.message);
+    }
     throw new Error("Failed to rank PEM candidates");
   }
 }
