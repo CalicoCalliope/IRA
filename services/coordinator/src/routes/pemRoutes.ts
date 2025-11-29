@@ -88,6 +88,11 @@ function normalizePackages(pkgs?: any[]): string[] {
  * 6. Return HRA to frontend
  */
 router.post("/process-pem", async (req: Request, res: Response) => {
+
+  const EXTENSION_MODE: "full" | "baseline" =
+  req.body.mode === "full" ? "full" : "baseline"; // default to baseline
+  console.log("[Coordinator] Extension mode from request:", EXTENSION_MODE);
+
   try {
     const pemSubmission: PemSubmission = req.body;
 
@@ -113,6 +118,7 @@ router.post("/process-pem", async (req: Request, res: Response) => {
       isFirstOccurrence: isFirstOccurrence,
       llm: {},
       accessed: {},
+      mode: EXTENSION_MODE,
     });
 
     // Embed the code snippet
@@ -137,7 +143,20 @@ router.post("/process-pem", async (req: Request, res: Response) => {
 
     // Update MongoDB record with HRA
     await dbService.updatePEM(pemRecord.id, { llm: llmResponse, code: contextCode });
-    
+
+    // ----------------------------------------
+    // BASELINE MODE: return ONLY the LLM answer
+    // ----------------------------------------
+    if (EXTENSION_MODE === "baseline") {
+      return res.json({
+        isFirstOccurrence,
+        code: contextCode,
+        hra: {
+          answer: llmResponse.answer ?? null
+        }
+      });
+    }
+
     // Decide what to return based on experiment mode
     if (EXPERIMENT_MODE === "population") {
       // Show LLM output directly
@@ -229,9 +248,9 @@ router.post("/process-pem", async (req: Request, res: Response) => {
 router.patch("/accessed/:pemId", async (req: Request, res: Response) => {
   try {
     const pemId = req.params.pemId;
-    const accessedUpdate = req.body as { hint?: boolean; reasoning?: boolean; answer?: boolean };
+    const updates = req.body as { hint?: boolean; reasoning?: boolean; answer?: boolean };
 
-    if (!accessedUpdate || Object.keys(accessedUpdate).length === 0) {
+    if (!updates || Object.keys(updates).length === 0) {
       return res.status(400).json({ error: "No accessed fields provided" });
     }
 
@@ -240,12 +259,25 @@ router.patch("/accessed/:pemId", async (req: Request, res: Response) => {
     if (!pem) return res.status(404).json({ error: "PEM not found" });
 
     // Merge existing accessed fields with updates
-    const updatedAccessed = { ...pem.accessed, ...accessedUpdate };
+    const updatedAccessed = { ...pem.accessed, ...updates };
+
+    // Append timestamped HRA events
+    const newEvents = Object.keys(updates)
+      .filter(key => 
+        updates[key as keyof typeof updates] === true &&
+        !pem.accessed[key as keyof typeof pem.accessed] // <-- only if not previously accessed
+      )
+      .map(key => ({
+        type: key as "hint" | "reasoning" | "answer",
+        timestamp: new Date().toISOString()
+      }));
+
+    const updatedEvents = [...(pem.hraEvents || []), ...newEvents];
 
     // Update in DB
-    await dbService.updatePEM(pemId, { accessed: updatedAccessed });
+    await dbService.updatePEM(pemId, { accessed: updatedAccessed, hraEvents: updatedEvents });
 
-    return res.json({ status: "ok", accessed: updatedAccessed });
+    return res.json({ status: "ok", accessed: updatedAccessed, hraEvents: updatedEvents });
   } catch (err: any) {
     console.error("Error updating accessed HRA:", err);
     return res.status(500).json({ error: err.message });

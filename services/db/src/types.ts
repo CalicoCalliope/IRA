@@ -22,4 +22,8 @@ export interface PemLogEntry {
     reasoning?: boolean;
     answer?: boolean;
   };
+  hraEvents?: {
+    type: "hint" | "reasoning" | "answer";
+    timestamp: string; // ISO string
+  }[];
 }

@@ -1,6 +1,15 @@
 // src/types.ts
 
 // -------------------------
+// NEW — HRA Event
+// -------------------------
+export interface HRAEvent {
+  type: "hint" | "reasoning" | "answer";
+  timestamp: string;                 // ISO timestamp
+  metadata?: Record<string, any>;    // optional
+}
+
+// -------------------------
 // PEM submission from frontend
 // -------------------------
 export interface PemSubmission {
@@ -15,6 +24,7 @@ export interface PemSubmission {
   directoryTree: string[];
   pythonVersion?: string;
   packages?: string[];
+  mode?: 'full' | 'baseline';
 }
 
 // -------------------------
@@ -29,6 +39,8 @@ export interface PemLogEntry extends PemSubmission {
     reasoning?: boolean;
     answer?: boolean;
   };
+  hraEvents?: HRAEvent[];
+  mode?: 'full' | 'baseline';
 }
 
 // -------------------------
