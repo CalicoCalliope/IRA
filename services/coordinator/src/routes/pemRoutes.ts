@@ -99,8 +99,6 @@ router.post("/process-pem", async (req: Request, res: Response) => {
     let contextCode = extractTaskSnippet(pemSubmission.code);
     console.log("Extracted context code:\n", contextCode);
 
-    let EXPERIMENT_MODE: string = "evaluation"; // "evaluation" OR "population"
-
     // Check if PEM is first occurrence
     const existingPEMs = await dbService.getPEMs({
       username: pemSubmission.username,
@@ -144,26 +142,13 @@ router.post("/process-pem", async (req: Request, res: Response) => {
     // Update MongoDB record with HRA
     await dbService.updatePEM(pemRecord.id, { llm: llmResponse, code: contextCode });
 
-    // ----------------------------------------
-    // BASELINE MODE: return ONLY the LLM answer
-    // ----------------------------------------
-    if (EXTENSION_MODE === "baseline") {
-      return res.json({
-        isFirstOccurrence,
-        code: contextCode,
-        hra: {
-          answer: llmResponse.answer ?? null
-        }
-      });
-    }
-
     // Decide what to return based on experiment mode
-    if (EXPERIMENT_MODE === "population") {
+    if (EXTENSION_MODE === "baseline") {
       // Show LLM output directly
       return res.json({ isFirstOccurrence, code: contextCode, hra: llmResponse });
     }
 
-    if (EXPERIMENT_MODE === "evaluation" && !isFirstOccurrence) {
+    if (EXTENSION_MODE === "full" && !isFirstOccurrence) {
       // Fetch candidate embeddings from Embedder
       const filterResponse = await embedderService.filterEmbeddings({
         username: pemSubmission.username,
