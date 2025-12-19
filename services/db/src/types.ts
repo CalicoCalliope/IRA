@@ -27,3 +27,10 @@ export interface PemLogEntry {
     timestamp: string; // ISO string
   }[];
 }
+
+export interface UserEvent {
+  type: 'file_closed';
+  timestamp: string;
+  username: string;
+  file: string;
+}

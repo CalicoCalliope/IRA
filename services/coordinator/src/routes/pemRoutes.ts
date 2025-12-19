@@ -1,6 +1,6 @@
 // src/routes/pemRoutes.ts
 import express, { Request, Response } from "express";
-import { PemSubmission, PemLogEntry, EmbedRequest, EmbedResponse, LLMRequest, LLMResponse, RankRequest, RankResponse, RankerCandidate } from "../types.js";
+import { PemSubmission, PemLogEntry, EmbedRequest, EmbedResponse, LLMRequest, LLMResponse, RankRequest, RankResponse, RankerCandidate, UserEvent} from "../types.js";
 import * as dbService from "../services/dbService.js";
 import * as embedderService from "../services/embedderService.js";
 import * as llmService from "../services/llmService.js";
@@ -221,6 +221,32 @@ router.post("/process-pem", async (req: Request, res: Response) => {
     return res.json({ isFirstOccurrence: isFirstOccurrence, code: contextCode, hra: llmResponse });
   } catch (err: any) {
     console.error("Error processing PEM:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /events
+ * Logs non-PEM user interaction events (telemetry)
+ */
+router.post('/events', async (req: Request, res: Response) => {
+  try {
+    const event = req.body as UserEvent;
+
+    if (
+      !event ||
+      !event.type ||
+      !event.timestamp ||
+      !event.username
+    ) {
+      return res.status(400).json({ error: 'Invalid event payload' });
+    }
+
+    await dbService.createUserEvent(event);
+
+    return res.json({ status: 'ok' });
+  } catch (err: any) {
+    console.error('[Coordinator] Failed to log event:', err);
     return res.status(500).json({ error: err.message });
   }
 });

@@ -1,6 +1,6 @@
 // src/services/dbService.ts
 import axios from "axios";
-import { PemLogEntry, PemSubmission, LLMResponse } from "../types.js";
+import { PemLogEntry, PemSubmission, LLMResponse, UserEvent } from "../types.js";
 
 // Use environment variable for DB service URL
 const DB_SERVICE_URL = process.env.DB_SERVICE_URL || "http://localhost:5001";
@@ -24,6 +24,10 @@ interface DBCreateResponse {
 }
 
 interface DBPatchResponse {
+  status: string;
+}
+
+interface DBEventCreateResponse {
   status: string;
 }
 
@@ -68,4 +72,11 @@ export async function createPEM(
 // -------------------------
 export async function updatePEM(id: string, updates: Partial<PemLogEntry>): Promise<void> {
   await axios.patch<DBPatchResponse>(`${DB_SERVICE_URL}/pems/${id}`, updates);
+}
+
+// -------------------------
+// Create User Event
+// -------------------------
+export async function createUserEvent(event: UserEvent): Promise<void> {
+  await axios.post<DBEventCreateResponse>(`${DB_SERVICE_URL}/events`, event);
 }

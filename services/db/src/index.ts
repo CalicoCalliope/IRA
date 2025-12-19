@@ -2,7 +2,7 @@ import express from "express";
 import * as dotenv from "dotenv";
 import * as path from "path";
 import { MongoClient } from "mongodb";
-import { PemLogEntry } from "./types";
+import { PemLogEntry, UserEvent } from "./types";
 
 // Load .env using absolute path
 const envPath = path.resolve(__dirname, "../.env");
@@ -14,6 +14,7 @@ if (!MONGODB_URI) throw new Error("MONGODB_URI not defined in .env");
 
 let mongo: MongoClient;
 let pemCollection: any;
+let userEventCollection: any;
 
 export async function connectMongo(testDbName?: string) {
   const MONGODB_URI = process.env.MONGODB_URI;
@@ -24,12 +25,18 @@ export async function connectMongo(testDbName?: string) {
   const dbName = testDbName || "iraLogs";
   const db = mongo.db(dbName);
   pemCollection = db.collection<PemLogEntry>("pems");
+  userEventCollection = db.collection<UserEvent>("user_events");
   console.log(`[MongoDB] Connected to ${dbName}`);
 }
 
 export function getPemCollection() {
   if (!pemCollection) throw new Error("MongoDB not connected yet");
   return pemCollection;
+}
+
+export function getUserEventCollection() {
+  if (!userEventCollection) throw new Error("MongoDB not connected yet");
+  return userEventCollection;
 }
 
 // --- Express App ---
@@ -101,6 +108,28 @@ app.delete("/pems/:id", async (req, res) => {
     if (result.deletedCount === 0) return res.status(404).json({ error: "PEM not found" });
     res.json({ status: "ok" });
   } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- User Event Routes ---
+
+app.post("/events", async (req, res) => {
+  const event: UserEvent = req.body;
+
+  if (!event.type || !event.timestamp || !event.username) {
+    return res.status(400).json({ error: "Invalid event payload" });
+  }
+
+  try {
+    await userEventCollection.insertOne({
+      ...event,
+      createdAt: new Date(event.timestamp),
+    });
+
+    res.json({ status: "ok" });
+  } catch (err: any) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });

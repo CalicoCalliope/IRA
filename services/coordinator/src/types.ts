@@ -157,3 +157,10 @@ export interface LLMResponse {
   reasoning?: string;
   answer?: Tier3;
 }
+
+export interface UserEvent {
+  type: 'file_closed';
+  timestamp: string;
+  username: string;
+  file: string;
+}
