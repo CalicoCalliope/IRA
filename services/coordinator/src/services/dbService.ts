@@ -48,6 +48,18 @@ export async function getPEMs(filters: {
   return response.data.data || [];
 }
 
+export async function getPEMbyType(filters: {
+  username?: string;
+  pemType?: string;
+}): Promise<PemLogEntry[]> {
+  const params: Record<string, string> = {};
+  if (filters.username) params.username = filters.username;
+  if (filters.pemType) params.pemType = filters.pemType;
+
+  const response = await axios.get<DBListResponse>(`${DB_SERVICE_URL}/pems`, { params });
+  return response.data.data || [];
+}
+
 // -------------------------
 // Fetch PEM by ID
 // -------------------------

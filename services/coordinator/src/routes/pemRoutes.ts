@@ -109,6 +109,7 @@ router.post("/process-pem", async (req: Request, res: Response) => {
     const isFirstOccurrence = existingPEMs.length === 0;
     let pemRecord: PemLogEntry;
     let myuuid = uuidv4();
+    let reusedFromHistory = false;
 
     pemRecord = await dbService.createPEM({
       id: myuuid,
@@ -145,33 +146,60 @@ router.post("/process-pem", async (req: Request, res: Response) => {
     // Decide what to return based on experiment mode
     if (EXTENSION_MODE === "baseline") {
       // Show LLM output directly
-      return res.json({ isFirstOccurrence, code: contextCode, hra: llmResponse });
+      return res.json({ isFirstOccurrence, reusedFromHistory,code: contextCode, hra: llmResponse });
     }
 
     if (EXTENSION_MODE === "full" && !isFirstOccurrence) {
-      // Fetch candidate embeddings from Embedder
+      // 1. Fetch candidate embeddings from Embedder
       const filterResponse = await embedderService.filterEmbeddings({
         username: pemSubmission.username,
         pem_type: pemSubmission.pemType,
         n_results: 100,
       });
 
-      // Exclude the current PEM from the candidates (avoid self-match)
-      const candidates = filterResponse.embeddings
-        .filter(e => e.primary_key !== pemRecord.id)
-        .map(e => ({
-          id: e.primary_key,
-          vector_similarity: 0, // Ranker computes actual similarity internally
-          pemSkeleton: pemSubmission.pemSkeleton,
-          timestamp: new Date(e.timestamp * 1000).toISOString(),
-          activeFile_hash: hashString(pemSubmission.activeFile),
-          workingDirectory_hash: hashString(pemSubmission.workingDirectory),
-          directoryTree: pemSubmission.directoryTree || [],
-          packages: normalizePackages(pemSubmission.packages),
-          pythonVersion: pemSubmission.pythonVersion,
-        }));
+      // 2. Build candidate list:
+      //    - exclude self
+      //    - exclude same active file
+      const candidates = [];
 
-      // Prepare RankRequest
+      for (const e of filterResponse.embeddings) {
+        // Skip self
+        if (e.primary_key === pemRecord.id) continue;
+
+        const candidatePEM = await dbService.getPEMById(e.primary_key);
+        if (!candidatePEM) continue;
+
+        // Exclude PEMs from the same file (raw path comparison)
+        if (candidatePEM.activeFile === pemSubmission.activeFile) {
+          continue;
+        }
+
+        candidates.push({
+          id: e.primary_key,
+          vector_similarity: 0, // Ranker computes similarity
+          pemSkeleton: candidatePEM.pemSkeleton,
+          timestamp: new Date(e.timestamp * 1000).toISOString(),
+          activeFile_hash: hashString(candidatePEM.activeFile),
+          workingDirectory_hash: hashString(candidatePEM.workingDirectory),
+          directoryTree: candidatePEM.directoryTree || [],
+          packages: normalizePackages(candidatePEM.packages),
+          pythonVersion: candidatePEM.pythonVersion,
+        });
+      }
+
+      // 3. Safety fallback: no eligible cross-file candidates
+      if (candidates.length === 0) {
+        console.log("[Coordinator] No eligible cross-file candidates found");
+
+        return res.json({
+           isFirstOccurrence: isFirstOccurrence,
+           reusedFromHistory,
+           code: contextCode,
+           hra: llmResponse,
+        });
+      }
+
+      // 4. Prepare RankRequest
       const rankRequest: RankRequest = {
         params: {
           k: 3,
@@ -194,28 +222,34 @@ router.post("/process-pem", async (req: Request, res: Response) => {
           packages: normalizePackages(pemSubmission.packages),
           pythonVersion: pemSubmission.pythonVersion,
         },
-        candidates, // use filtered list
+        candidates,
       };
 
-      // Debug: see what ranker got
-      console.log("[Coordinator] Sending candidates to ranker:", candidates.map(c => c.id));
+      // 5. Debug
+      console.log(
+        "[Coordinator] Sending candidates to ranker:",
+        candidates.map(c => c.id)
+      );
 
-      // Call Ranker
+      // 6. Call Ranker
       const rankResponse: RankResponse = await rankingService.rankPEM(rankRequest);
 
-      // Debug: see what coordinator received
-      console.log("[Coordinator] Ranker response:", JSON.stringify(rankResponse, null, 2));
+      console.log(
+        "[Coordinator] Ranker response:",
+        JSON.stringify(rankResponse, null, 2)
+      );
 
-      // Fetch HRA for best-ranked PEM
-      let hra: LLMResponse = {};
+      // 7. Fetch HRA for best-ranked PEM
+      let hra: LLMResponse = llmResponse; // default to current LLM
       if (rankResponse.best?.id) {
         const bestPEM = await dbService.getPEMById(rankResponse.best.id);
         hra = bestPEM.llm;
         contextCode = bestPEM.code;
+        reusedFromHistory = true;
       }
 
-      // Return HRA to frontend
-      return res.json({ isFirstOccurrence: isFirstOccurrence, code: contextCode, hra });
+      // 8. Return HRA to frontend
+      return res.json({ isFirstOccurrence, reusedFromHistory, code: contextCode, hra });
     }
 
     return res.json({ isFirstOccurrence: isFirstOccurrence, code: contextCode, hra: llmResponse });
