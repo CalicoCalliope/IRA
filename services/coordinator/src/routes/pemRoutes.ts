@@ -7,6 +7,63 @@ import * as llmService from "../services/llmService.js";
 import * as rankingService from "../services/rankingService.js";
 import crypto from "crypto";
 import {v4 as uuidv4} from 'uuid';
+import path from "path";
+
+function isAxiosError(err: any): boolean {
+  return err && err.isAxiosError === true;
+}
+
+function describeError(err: unknown) {
+  const e = err as any;
+
+  if (isAxiosError(e)) {
+    return {
+      kind: "axios",
+      message: e.message,
+      method: e.config?.method?.toUpperCase(),
+      url: e.config?.url,
+      status: e.response?.status,
+      responseData: e.response?.data,
+      requestData: e.config?.data,
+      params: e.config?.params,
+    };
+  }
+
+  if (err instanceof Error) {
+    return {
+      kind: "error",
+      message: err.message,
+      stack: err.stack,
+    };
+  }
+
+  return {
+    kind: "unknown",
+    value: String(err),
+  };
+}
+
+async function runStep<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    console.log(`[Coordinator] START ${name}`);
+    const result = await fn();
+    console.log(`[Coordinator] OK ${name}`);
+    return result;
+  } catch (err) {
+    const info = describeError(err);
+    console.error(`[Coordinator] FAIL ${name}`, JSON.stringify(info, null, 2));
+
+    const wrapped = new Error(
+      `Step '${name}' failed: ${info.message}` +
+      (info.url ? ` | ${info.method ?? "?"} ${info.url}` : "") +
+      (info.status ? ` | status ${info.status}` : "")
+    );
+
+    (wrapped as any).details = info;
+    throw wrapped;
+  }
+}
+
 const router = express.Router();
 
 /**
@@ -100,25 +157,32 @@ router.post("/process-pem", async (req: Request, res: Response) => {
     console.log("Extracted context code:\n", contextCode);
 
     // Check if PEM is first occurrence
-    const existingPEMs = await dbService.getPEMs({
-      username: pemSubmission.username,
-      pemType: pemSubmission.pemType,
-      pemSkeleton: pemSubmission.pemSkeleton,
-    });
+    const existingPEMs = await runStep("dbService.getPEMs", () =>
+      dbService.getPEMs({
+        username: pemSubmission.username,
+        pemType: pemSubmission.pemType,
+        pemSkeleton: pemSubmission.pemSkeleton,
+      })
+    );
 
     const isFirstOccurrence = existingPEMs.length === 0;
     let pemRecord: PemLogEntry;
     let myuuid = uuidv4();
     let reusedFromHistory = false;
 
-    pemRecord = await dbService.createPEM({
-      id: myuuid,
-      ...pemSubmission,
-      isFirstOccurrence: isFirstOccurrence,
-      llm: {},
-      accessed: {},
-      mode: EXTENSION_MODE,
-    });
+    // Just log the occurrence status for later debugging, if needed
+    console.log("[Coordinator] isFirstOccurrence:", isFirstOccurrence);
+
+    pemRecord = await runStep("dbService.createPEM", () =>
+      dbService.createPEM({
+        id: myuuid,
+        ...pemSubmission,
+        isFirstOccurrence,
+        llm: {},
+        accessed: {},
+        mode: EXTENSION_MODE,
+      })
+    );
 
     // Embed the code snippet
     const embedRequest: EmbedRequest = {
@@ -128,7 +192,10 @@ router.post("/process-pem", async (req: Request, res: Response) => {
       pem_type: pemSubmission.pemType,
       timestamp: Math.floor(new Date(pemSubmission.timestamp).getTime() / 1000),
     };
-    const embedResponse: EmbedResponse = await embedderService.createEmbedding(embedRequest);
+
+    const embedResponse = await runStep("embedderService.createEmbedding", () =>
+      embedderService.createEmbedding(embedRequest)
+    );
 
     // Call LLM for HRA
     const llmRequest: LLMRequest = {
@@ -138,10 +205,14 @@ router.post("/process-pem", async (req: Request, res: Response) => {
       activeFile: pemSubmission.activeFile,
     };
 
-    const llmResponse: LLMResponse = await llmService.generateHRA(llmRequest);
+    const llmResponse = await runStep("llmService.generateHRA", () =>
+      llmService.generateHRA(llmRequest)
+    );
 
     // Update MongoDB record with HRA
-    await dbService.updatePEM(pemRecord.id, { llm: llmResponse, code: contextCode });
+    await runStep("dbService.updatePEM", () =>
+      dbService.updatePEM(pemRecord.id, { llm: llmResponse, code: contextCode })
+    );
 
     // Decide what to return based on experiment mode
     if (EXTENSION_MODE === "baseline") {
@@ -151,26 +222,49 @@ router.post("/process-pem", async (req: Request, res: Response) => {
 
     if (EXTENSION_MODE === "full" && !isFirstOccurrence) {
       // 1. Fetch candidate embeddings from Embedder
-      const filterResponse = await embedderService.filterEmbeddings({
-        username: pemSubmission.username,
-        pem_type: pemSubmission.pemType,
-        n_results: 100,
-      });
+      const filterResponse = await runStep("embedderService.filterEmbeddings", () =>
+        embedderService.filterEmbeddings({
+          username: pemSubmission.username,
+          pem_type: pemSubmission.pemType,
+          n_results: 100,
+        })
+      );
+
+      // Just log the count for debugging
+      console.log("[Coordinator] filterEmbeddings count:", filterResponse.embeddings.length);
 
       // 2. Build candidate list:
       //    - exclude self
-      //    - exclude same active file
+      //    - exclude same active file (via path comparison)
+      //    - exclude same file name (via file name comparison only)
+      //    - exclude exact code matches
       const candidates = [];
 
       for (const e of filterResponse.embeddings) {
         // Skip self
         if (e.primary_key === pemRecord.id) continue;
 
-        const candidatePEM = await dbService.getPEMById(e.primary_key);
+        const candidatePEM = await runStep(`dbService.getPEMById(${e.primary_key})`, () =>
+          dbService.getPEMById(e.primary_key)
+        );
         if (!candidatePEM) continue;
 
         // Exclude PEMs from the same file (raw path comparison)
         if (candidatePEM.activeFile === pemSubmission.activeFile) {
+          continue;
+        }
+
+        // // Exclude same file name (raw file name comparison)
+        // // Protect against empty activeFile by defaulting to empty string
+        // const candidateFile = candidatePEM.activeFile || "";
+        // const currentFile = pemSubmission.activeFile || "";
+
+        // if (path.basename(candidateFile) === path.basename(currentFile)) {
+        //   continue;
+        // }
+
+        // Exclude PEMs if the code is exactly the same
+        if (candidatePEM.code === contextCode) {
           continue;
         }
 
@@ -205,7 +299,7 @@ router.post("/process-pem", async (req: Request, res: Response) => {
           k: 3,
           mmr_lambda: 0.7,
           confidence_floor: 0.5,
-          recency_half_life_days: 14.0,
+          recency_half_life_days: 150.0,
           skeleton_filter_threshold: 0.6,
           allow_repeat_depth: 3,
           allow_repeat_min_hours: 24.0,
@@ -232,7 +326,9 @@ router.post("/process-pem", async (req: Request, res: Response) => {
       );
 
       // 6. Call Ranker
-      const rankResponse: RankResponse = await rankingService.rankPEM(rankRequest);
+      const rankResponse = await runStep("rankingService.rankPEM", () =>
+        rankingService.rankPEM(rankRequest)
+      );
 
       console.log(
         "[Coordinator] Ranker response:",
@@ -241,11 +337,20 @@ router.post("/process-pem", async (req: Request, res: Response) => {
 
       // 7. Fetch HRA for best-ranked PEM
       let hra: LLMResponse = llmResponse; // default to current LLM
-      if (rankResponse.best?.id) {
-        const bestPEM = await dbService.getPEMById(rankResponse.best.id);
-        hra = bestPEM.llm;
+
+      const bestId = rankResponse.best?.id;
+
+      if (bestId) {
+        const bestPEM = await runStep(`dbService.getPEMById(best:${bestId})`, () =>
+          dbService.getPEMById(bestId)
+        );
         contextCode = bestPEM.code;
         reusedFromHistory = true;
+        hra = {
+          ...llmResponse,
+          answer: bestPEM.llm.answer, // historical tier 3
+        };
+
       }
 
       // 8. Return HRA to frontend
@@ -254,8 +359,13 @@ router.post("/process-pem", async (req: Request, res: Response) => {
 
     return res.json({ isFirstOccurrence: isFirstOccurrence, code: contextCode, hra: llmResponse });
   } catch (err: any) {
-    console.error("Error processing PEM:", err);
-    return res.status(500).json({ error: err.message });
+      const info = describeError(err);
+      console.error("[Coordinator] Error processing PEM:", JSON.stringify(info, null, 2));
+
+      return res.status(500).json({
+        error: err?.message || "Unknown coordinator error",
+        details: err?.details || info,
+      });
   }
 });
 
